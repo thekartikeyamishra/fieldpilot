@@ -1,0 +1,58 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: fieldpilot
+          POSTGRES_PASSWORD: fieldpilot
+          POSTGRES_DB: fieldpilot
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U fieldpilot"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    env:
+      DATABASE_URL: postgres://fieldpilot:fieldpilot@localhost:5432/fieldpilot
+      AUTH_SECRET: ci-secret-value-that-is-long-enough-for-validation
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Apply schema
+        run: npm run db:push
+      - name: Seed
+        run: npm run seed
+      - name: Build
+        run: npm run build
+
+  secrets:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Fail if a key-shaped string was committed
+        run: |
+          if git grep -nIE "(ASSEMBLYAI_API_KEY|AI_API_KEY)[[:space:]]*=[[:space:]]*[A-Za-z0-9]{16,}" -- . ':!.env.example'; then
+            echo "A real-looking API key is present in the repository."
+            exit 1
+          fi
+          echo "No committed secrets found."

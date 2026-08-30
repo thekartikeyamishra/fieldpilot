@@ -1,0 +1,107 @@
+@import "tailwindcss";
+
+/* ---------------------------------------------------------------------------
+   FieldPilot design tokens.
+   The product is read on a phone, in a plant room, by someone wearing gloves.
+   Steel greys carry the interface; hi-vis amber is spent in exactly one place
+   (live voice state); instrument blue marks the single action on any screen.
+   Anything the system asserts as fact - asset tags, readings, work order
+   numbers, timers, costs - is set in mono. Language is set in sans.
+--------------------------------------------------------------------------- */
+@theme {
+  --color-steel-950: #0b1013;
+  --color-steel-900: #121b20;
+  --color-800: #1e2a31;
+  --color-steel-800: #1e2a31;
+  --color-steel-700: #33454f;
+  --color-steel-500: #5b6e79;
+  --color-steel-400: #8598a3;
+  --color-steel-300: #b8c4cb;
+  --color-steel-200: #d3dae0;
+  --color-steel-100: #e6ebee;
+  --color-steel-50: #f2f5f7;
+
+  --color-hivis-500: #f2c230;
+  --color-hivis-600: #d9a70f;
+  --color-signal-500: #0f6fb8;
+  --color-signal-600: #0b578f;
+  --color-signal-50: #e8f2fa;
+  --color-ok-500: #157f4b;
+  --color-warn-500: #b45309;
+  --color-danger-500: #b42318;
+
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Cascadia Mono", "Segoe UI Mono", "Roboto Mono", Menlo, monospace;
+
+  --radius-panel: 4px;
+}
+
+:root {
+  --bg: var(--color-steel-50);
+  --surface: #ffffff;
+  --ink: var(--color-steel-950);
+  --muted: var(--color-steel-500);
+  --line: var(--color-steel-200);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: var(--color-steel-950);
+    --surface: var(--color-steel-900);
+    --ink: var(--color-steel-50);
+    --muted: var(--color-steel-400);
+    --line: var(--color-steel-700);
+  }
+}
+
+html { color-scheme: light dark; }
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Panel legend: the small uppercase labels on industrial equipment. */
+.legend {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-panel);
+}
+
+.data { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+
+/* Signature element: the state rail. A segmented indicator strip that shows
+   the machine's actual state, the way acontrol panel does - never a spinner. */
+.rail-seg {
+  height: 3px;
+  flex: 1;
+  background: var(--line);
+  transition: background-color 180ms ease;
+}
+.rail-seg[data-on="true"] { background: var(--color-signal-500); }
+.rail-seg[data-live="true"] { background: var(--color-hivis-500); }
+
+@keyframes breathe { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+.listening { animation: breathe 1.6s ease-in-out infinite; }
+
+@keyframes riseIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+.rise { animation: riseIn 220ms ease-out both; }
+
+*:focus-visible {
+  outline: 2px solid var(--color-signal-500);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.001ms !important; transition-duration: 0.001ms !important; }
+}
