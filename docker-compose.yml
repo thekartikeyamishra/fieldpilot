@@ -1,3 +1,9 @@
+# The host port comes from FIELDPILOT_DB_PORT in .env, so it can be changed in
+# ONE place when 5432 is already taken by another project. setup.ps1 detects a
+# conflict and writes that variable for you.
+#
+# Docker Compose reads .env (not .env.local) automatically, which is why the
+# port lives there while application config lives in .env.local.
 services:
   db:
     image: postgres:16-alpine
@@ -8,14 +14,14 @@ services:
       POSTGRES_PASSWORD: fieldpilot
       POSTGRES_DB: fieldpilot
     ports:
-      - "5432:5432"
+      - "${FIELDPILOT_DB_PORT:-5432}:5432"
     volumes:
       - fieldpilot_pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fieldpilot -d fieldpilot"]
-      interval: 5s
-      timeout: 5s
-      retries: 10
+      interval: 3s
+      timeout: 3s
+      retries: 20
 
 volumes:
   fieldpilot_pgdata:

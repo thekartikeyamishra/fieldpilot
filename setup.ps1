@@ -12,7 +12,9 @@
 [CmdletBinding()]
 param(
     [switch]$Check,
-    [switch]$SkipDocker
+    [switch]$SkipDocker,
+    # Force a specific host port for Postgres. Omitted, setup picks a free one.
+    [int]$DbPort = 0
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,23 +123,72 @@ Ok "Dependencies installed"
 # ---------------------------------------------------------------------------
 Step "Starting Postgres"
 
+<#
+  Another project may already own 5432 — a second Postgres container is the
+  usual culprit. Rather than failing, pick a free port and write it to BOTH
+  places that need it, so docker-compose.yml and .env.local can never disagree.
+#>
+function Test-PortFree([int]$port) {
+    try { return -not (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) }
+    catch { return $true }
+}
+
+$chosenPort = 0
+
 if ($SkipDocker) {
     Ok "Skipped - using the DATABASE_URL you configured"
 } else {
     $dockerPresent = $null -ne (Get-Command docker -ErrorAction SilentlyContinue)
     if (-not $dockerPresent) {
         Warn "Docker is not on PATH."
-        Warn "Start your own Postgres and point DATABASE_URL at it, then re-run with -SkipDocker."
+        Warn "Start your own Postgres, point DATABASE_URL at it, then re-run with -SkipDocker."
     } else {
+        if ($DbPort -gt 0) {
+            $chosenPort = $DbPort
+        } else {
+            $chosenPort = 5432
+            while (-not (Test-PortFree $chosenPort) -and $chosenPort -lt 5450) {
+                # Is it OUR container already running there? Then it is not a conflict.
+                $owner = (docker ps --filter "publish=$chosenPort" --format "{{.Names}}" 2>$null) -join ""
+                if ($owner -match "fieldpilot-db") { break }
+                Warn "Port $chosenPort is already in use$(if ($owner) { " by $owner" }). Trying $($chosenPort + 1)."
+                $chosenPort++
+            }
+        }
+        Ok "Using host port $chosenPort for Postgres"
+
+        # Compose reads .env automatically; this is the single source for the port.
+        $envFile = Join-Path $PSScriptRoot ".env"
+        $lines = @()
+        if (Test-Path -LiteralPath $envFile) {
+            $lines = (Get-Content $envFile) | Where-Object { $_ -notmatch "^FIELDPILOT_DB_PORT=" }
+        }
+        ($lines + "FIELDPILOT_DB_PORT=$chosenPort") | Set-Content $envFile
+
         try {
             Invoke-Native "docker compose up -d" "docker compose up"
-            Ok "Postgres container is up on localhost:5432"
-            Write-Host "  waiting for it to accept connections..." -ForegroundColor DarkGray
-            Start-Sleep -Seconds 6
         } catch {
             Bad $_.Exception.Message
-            Write-Host "  Is Docker Desktop actually running? Start it and try again," -ForegroundColor Yellow
-            Write-Host "  or run: .\setup.ps1 -SkipDocker" -ForegroundColor Yellow
+            Write-Host "  Is Docker Desktop running? If a stale container is holding the port:" -ForegroundColor Yellow
+            Write-Host "    docker rm -f fieldpilot-db; .\setup.ps1" -ForegroundColor Yellow
+            exit 1
+        }
+
+        # Poll readiness instead of sleeping a fixed guess. Postgres accepting
+        # TCP is not the same as Postgres being ready to answer a query, and a
+        # too-short sleep is why "schema push failed" appears right after a
+        # successful "container started".
+        Write-Host "  waiting for Postgres to accept queries..." -ForegroundColor DarkGray
+        $ready = $false
+        foreach ($i in 1..40) {
+            docker exec fieldpilot-db pg_isready -U fieldpilot -d fieldpilot 2>&1 | Out-Null
+            if ($LASTEXITCODE -eq 0) { $ready = $true; break }
+            Start-Sleep -Seconds 1
+        }
+        if ($ready) { Ok "Postgres is accepting queries" }
+        else {
+            Bad "Postgres did not become ready within 40 seconds."
+            Write-Host "  Inspect it with: docker compose logs db" -ForegroundColor Yellow
             exit 1
         }
     }
@@ -153,6 +204,20 @@ if (Test-Path -LiteralPath ".env.local") {
     $secret = node -e "console.log(require('crypto').randomBytes(48).toString('base64url'))"
     (Get-Content ".env.local") -replace "^AUTH_SECRET=.*", "AUTH_SECRET=$secret" | Set-Content ".env.local"
     Ok "Created .env.local with a generated AUTH_SECRET"
+}
+
+# Keep DATABASE_URL in step with the port docker actually published. This
+# mismatch — compose on one port, .env.local on another — is the single most
+# common breakage when a project is re-extracted over an existing setup.
+if ($chosenPort -gt 0) {
+    $envLocal = Get-Content ".env.local" -Raw
+    $current = [regex]::Match($envLocal, "(?m)^DATABASE_URL=.*?localhost:(\d+)/")
+    if ($current.Success -and $current.Groups[1].Value -ne "$chosenPort") {
+        Warn "DATABASE_URL points at port $($current.Groups[1].Value) but Postgres is on $chosenPort. Correcting it."
+        $envLocal = [regex]::Replace($envLocal, "(?m)^(DATABASE_URL=.*localhost):\d+/", "`$1:$chosenPort/")
+        Set-Content ".env.local" $envLocal.TrimEnd()
+        Ok "DATABASE_URL now points at port $chosenPort"
+    }
 }
 
 $envText = Get-Content ".env.local" -Raw

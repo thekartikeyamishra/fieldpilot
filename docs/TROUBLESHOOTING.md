@@ -46,6 +46,53 @@ Same cause. The project files are not where you are standing.
 
 ---
 
+## `Bind for 0.0.0.0:5432 failed: port is already allocated`
+
+Another Postgres already owns 5432 — usually a container from a different
+project. `docker ps` will name it.
+
+`setup.ps1` now handles this automatically: it finds a free port, writes
+`FIELDPILOT_DB_PORT` to `.env` (which docker compose reads), and corrects
+`DATABASE_URL` in `.env.local` to match. Just re-run it.
+
+To force a specific port:
+
+```powershell
+.\setup.ps1 -DbPort 5433
+```
+
+If a stale FieldPilot container is holding the port:
+
+```powershell
+docker rm -f fieldpilot-db
+.\setup.ps1
+```
+
+---
+
+## Schema push fails immediately after "container started"
+
+Two possible causes, both now handled by setup:
+
+1. **Postgres was not ready yet.** A container that has started is not the same
+   as a database accepting queries. Setup polls `pg_isready` for up to 40
+   seconds instead of sleeping a fixed guess.
+2. **The ports disagree.** `docker-compose.yml` publishes one port and
+   `DATABASE_URL` dials another. This happens when a project is re-extracted
+   over an existing setup: the archive overwrites `docker-compose.yml` while
+   your `.env.local` survives untouched.
+
+Check what docker actually published, and compare it with `DATABASE_URL`:
+
+```powershell
+docker compose ps
+Select-String -Path .env.local -Pattern "DATABASE_URL"
+```
+
+`npm run doctor` reports this mismatch by name.
+
+---
+
 ## Docker is installed but `docker compose up -d` fails
 
 Docker Desktop must actually be running, not merely installed. Start it, wait for the whale icon to
@@ -55,6 +102,22 @@ settle, then retry. If you would rather use your own Postgres:
 # put your own connection string in .env.local, then
 .\setup.ps1 -SkipDocker
 ```
+
+---
+
+## `relation "rate_limits" does not exist` / `column work_orders.org_number does not exist`
+
+Your database is behind the code — normal after pulling an update that adds a
+table or column. One command:
+
+```powershell
+npm run db:push          # development
+npm run db:migrate       # production, versioned migrations
+```
+
+`npm run doctor` and `/api/health` both detect this now and print the fix. If
+health shows `schema: false`, apply the migration before doing anything else —
+pages that touch the new column will crash until you do.
 
 ---
 
@@ -80,6 +143,25 @@ variables are read at boot.
 
 Everything except live microphone streaming works without it, including the typed input, the full
 orchestration path, approvals and the outcome ledger.
+
+---
+
+## Doctor says `LLM: 400 model not found`
+
+The provider does not recognise your `AI_MODEL_FAST` or `AI_MODEL_SMART`. Model
+catalogues change; these are configuration, not code.
+
+1. Open the AssemblyAI Playground or `assemblyai.com/docs/llm-gateway/available-models`
+   and copy an exact model string.
+2. Put it in `.env.local`, restart, and re-run `npm run doctor`.
+
+Note that `/api/health` reports the model router as configured **without**
+verifying the names — a live probe on every health poll would cost money on every
+poll. `npm run doctor` is what actually calls the provider. Trust doctor over
+health for model validity.
+
+Until it is fixed the agent runs degraded: real history, real procedures, real
+evidence, but no generated reasoning. Nothing else breaks.
 
 ---
 

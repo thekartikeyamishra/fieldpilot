@@ -42,10 +42,28 @@ async function main() {
       `;
       await sql.end();
       add("Database", true, `reachable, ${row.tables} tables`, row.tables === 0 ? "Run: npm run db:push" : undefined);
-      if (row.tables === 0) add("Schema", false, "no tables yet", "npm run db:push && npm run seed");
-      else add("Schema", true, `${row.tables} tables present`);
+
+      if (row.tables === 0) {
+        add("Schema", false, "no tables yet", "npm run db:push && npm run seed");
+      } else {
+        // A database behind the code is the most common failure after pulling
+        // an update, and the raw Postgres error it produces names neither the
+        // cause nor the fix.
+        const { checkSchema } = await import("../src/lib/schema-check");
+        const schema = await checkSchema();
+        add("Schema", schema.ok, schema.detail, schema.ok ? undefined : "npm run db:push");
+      }
     } catch (error) {
-      add("Database", false, String(error).slice(0, 120), "docker compose up -d  (then check docker compose ps)");
+      // The most common cause after a fresh extract: docker-compose.yml and
+      // .env.local disagree about the port, usually because another project
+      // already owns 5432.
+      const port = dbUrl.match(/:(\d{4,5})\//)?.[1] ?? "5432";
+      add(
+        "Database",
+        false,
+        String(error).slice(0, 120),
+        `Nothing is accepting connections on port ${port}. Check that the port in DATABASE_URL matches the one docker actually published: docker compose ps`,
+      );
     }
   }
 

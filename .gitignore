@@ -2,6 +2,8 @@ node_modules/
 .next/
 out/
 build/
+# .env holds only FIELDPILOT_DB_PORT for docker compose - no secrets.
+# .env.local holds the real configuration and stays ignored.
 .env
 .env.local
 .env.*.local

@@ -80,7 +80,8 @@ vercel --prod
 curl https://your-app.vercel.app/api/health
 ```
 
-Every check must be `true`. **If `rateLimiter` is false, stop** — the cost
+Every check must be `true` — including `schema`, which fails if the database is
+behind the deployed code. **If `rateLimiter` is false, stop** — the cost
 controls are not running and one abusive user can spend your money freely.
 
 Then run the full integration suite against production:
