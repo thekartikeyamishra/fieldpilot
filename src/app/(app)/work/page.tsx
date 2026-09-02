@@ -15,7 +15,7 @@ export default async function WorkPage() {
     db
       .select({
         id: workOrders.id,
-        number: workOrders.number,
+        number: workOrders.orgNumber,
         title: workOrders.title,
         description: workOrders.description,
         priority: workOrders.priority,

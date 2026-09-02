@@ -1,4 +1,4 @@
-import "dotenv/config";
+import "../src/lib/load-env";
 import { createHash } from "node:crypto";
 
 /**
@@ -25,7 +25,11 @@ async function main() {
 
   let failures = 0;
   for (const [name, rows] of Object.entries(payload.entities)) {
-    const actual = createHash("sha256").update(JSON.stringify(rows)).digest("hex");
+    // Must mirror exportStream exactly: sha256 over each row's JSON,
+    // concatenated in id order — not over the serialised array.
+    const hash = createHash("sha256");
+    for (const row of rows) hash.update(JSON.stringify(row));
+    const actual = hash.digest("hex");
     const expected = payload.manifest.checksums[name];
     const counted = payload.manifest.entityCounts[name] === rows.length;
     const ok = actual === expected && counted;

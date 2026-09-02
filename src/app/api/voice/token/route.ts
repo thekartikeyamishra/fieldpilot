@@ -18,7 +18,7 @@ export async function POST() {
   try {
     const session = await requireSession();
     if (!can(session.role, "voice:use")) throw new AppError("FORBIDDEN", "role cannot use voice");
-    rateLimit(`voice-token:${session.userId}`, 20, 60);
+    await rateLimit(`voice-token:${session.userId}`, 20, 60);
 
     const minted = await voiceProvider.mintClientToken(env.VOICE_SESSION_MAX_SECONDS);
 

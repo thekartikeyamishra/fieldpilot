@@ -84,6 +84,10 @@ export function useVoiceStream({ onFinalTurn, onPartial, onError }: Options) {
       const res = await fetch("/api/voice/token", { method: "POST" });
       const json = await res.json();
       if (!res.ok || !json.ok) {
+        // A missing provider key will never fix itself by trying again, so it
+        // is marked permanent and the reconnect loop is skipped entirely.
+        const permanent = json?.error?.code === "PROVIDER_NOT_CONFIGURED";
+        if (permanent) intentionalStopRef.current = true;
         throw new Error(json?.error?.message ?? "Voice is temporarily unavailable. Your work is safe.");
       }
 
@@ -205,13 +209,24 @@ export function useVoiceStream({ onFinalTurn, onPartial, onError }: Options) {
 
 /** Speech out. Browser-native, so it costs nothing and adds no latency;
  *  swap this one function for a hosted TTS provider without touching the UI. */
-export function speak(text: string) {
-  if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+export function speak(text: string, onDone?: () => void) {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) {
+    onDone?.();
+    return;
+  }
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.rate = 1.05;
   utterance.pitch = 1;
+  utterance.onend = () => onDone?.();
+  utterance.onerror = () => onDone?.();
   window.speechSynthesis.speak(utterance);
+
+  // Safari and some Android builds never fire onend. Without this the agent
+  // would believe it is still speaking and swallow every later transcript as
+  // an echo — a silent, total failure of voice input.
+  const estimatedMs = Math.min(30_000, 400 + text.length * 60);
+  setTimeout(() => onDone?.(), estimatedMs);
 }
 
 export function stopSpeaking() {

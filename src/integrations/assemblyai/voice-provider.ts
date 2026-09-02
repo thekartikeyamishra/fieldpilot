@@ -23,7 +23,7 @@ class AssemblyAIVoiceProvider implements VoiceProvider {
   }
 
   async mintClientToken(maxSessionSeconds: number) {
-    if (!this.isConfigured()) throw new AppError("PROVIDER_UNAVAILABLE", "ASSEMBLYAI_API_KEY is not set");
+    if (!this.isConfigured()) throw new AppError("PROVIDER_NOT_CONFIGURED", "ASSEMBLYAI_API_KEY is not set");
 
     const ttl = Math.min(Math.max(env.ASSEMBLYAI_TOKEN_TTL_SECONDS, 1), 600);
     const sessionCap = Math.min(Math.max(maxSessionSeconds, 60), 10800);

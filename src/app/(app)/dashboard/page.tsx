@@ -19,7 +19,7 @@ export default async function Dashboard() {
     db
       .select({
         id: workOrders.id,
-        number: workOrders.number,
+        number: workOrders.orgNumber,
         title: workOrders.title,
         priority: workOrders.priority,
         status: workOrders.status,

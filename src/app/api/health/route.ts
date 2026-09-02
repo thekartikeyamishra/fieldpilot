@@ -3,6 +3,8 @@ import { db } from "@/db/client";
 import { env } from "@/lib/env";
 import { isModelConfigured } from "@/ai/router";
 import { voiceProvider } from "@/integrations/assemblyai/voice-provider";
+import { rateLimiterHealthy } from "@/lib/rate-limit";
+import { licenceStatus } from "@/server/licensing/license";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,6 +20,16 @@ export async function GET() {
     checks.database = { ok: false, detail: `unreachable: ${String(error).slice(0, 120)}` };
   }
 
+  // A cost-control system that has silently stopped working is worse than none,
+  // because you believe you are protected.
+  checks.rateLimiter = await rateLimiterHealthy();
+
+  const licence = licenceStatus();
+  checks.licence = {
+    ok: licence.state === "hosted" || licence.state === "valid" || licence.state === "expiring",
+    detail: licence.state === "valid" ? `valid, ${licence.daysRemaining} days remaining` : licence.message ?? licence.state,
+  };
+
   checks.voiceProvider = voiceProvider.isConfigured()
     ? { ok: true, detail: `assemblyai · ${env.ASSEMBLYAI_SPEECH_MODEL}` }
     : { ok: false, detail: "ASSEMBLYAI_API_KEY missing" };
@@ -26,7 +38,7 @@ export async function GET() {
     ? { ok: true, detail: `${env.AI_MODEL_FAST} / ${env.AI_MODEL_SMART}` }
     : { ok: false, detail: "no LLM key — the agent will run in degraded mode" };
 
-  const healthy = checks.database.ok;
+  const healthy = checks.database.ok && checks.rateLimiter.ok;
 
   return Response.json(
     {

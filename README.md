@@ -24,6 +24,10 @@ The model proposes. Policy authorises. A human approves. A tool executes. Audit 
 
 Prerequisites: **Node.js 22+**, **Docker Desktop** (or any Postgres 16), **Git**.
 
+> **Extract the zip first.** `package.json` must sit next to `setup.ps1`. Do not run from a drive
+> root such as `E:\` — npm cannot create `node_modules` there. Use something like
+> `E:\projects\fieldpilot`. `.\setup.ps1 -Check` verifies this without changing anything.
+
 ```powershell
 # 1. Install dependencies
 npm install
@@ -46,6 +50,9 @@ npm run seed
 # 7. Run it
 npm run dev
 ```
+
+If anything goes wrong at any point, run `npm run doctor`. It names the broken piece and the fix.
+`docs/TROUBLESHOOTING.md` covers the failures people actually hit.
 
 Then open <http://localhost:3000/api/health> first. It tells you exactly which piece is not wired
 before you waste time guessing.
@@ -75,6 +82,17 @@ Every variable is documented in `.env.example`. The three that matter on day one
 | `AUTH_SECRET` | 32+ chars. Signs session cookies. |
 | `ASSEMBLYAI_API_KEY` | Server-side only. Mints short-lived browser tokens. |
 
+Public legal pages live at `/about`, `/contact`, `/pricing`, `/terms`, `/privacy` and `/refunds`.
+Payment providers require these to be reachable without signing in. **Edit `src/content/business.ts`
+before activation** — the legal name, address and domain are marked `TODO` and an incomplete address
+is the most common rejection reason. Full walkthrough in `docs/RAZORPAY.md`.
+
+For payments, `PAYMENTS_PROVIDER=mock` fulfils instantly without a card so you can exercise the whole
+purchase path locally. It is **refused at runtime in production** — set `PAYMENTS_PROVIDER=razorpay`
+with `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET` and `RAZORPAY_WEBHOOK_SECRET` before you deploy.
+Point the Razorpay webhook at `POST /api/billing/webhook/razorpay` and subscribe to
+`payment.captured` and `payment.failed`.
+
 `AI_API_KEY` is optional — it falls back to your AssemblyAI key, because the LLM Gateway accepts it.
 With no LLM key at all the agent still runs, in an honest degraded mode.
 
@@ -94,9 +112,34 @@ configuration, not code. If the Gateway rejects one, change the env var — noth
 | `npm run db:push` | Apply the schema (fast path for development) |
 | `npm run db:generate` / `db:migrate` | Versioned migrations (use these for production) |
 | `npm run seed` | Demo organisation with a real history to reason over |
+| `npm run doctor` | Diagnoses Node, env, database, schema, AssemblyAI key and LLM key — run this first when anything is wrong |
+| `npm run verify` | Typecheck plus unit tests, in one command |
+| `npm run smoke` | End-to-end test against a running server: sign-in, session, turn, approval, idempotency, role boundary, export |
+| `npm run loadtest` | Concurrency and limiter behaviour against a running deployment |
 | `npm run export:test` | Portability round-trip: export, recompute every checksum, verify |
 
 ---
+
+## Commercial model
+
+Credits are the abstraction between what a customer buys and what a request costs us, so provider
+prices can move without repricing the product.
+
+- **Deterministic and cached turns are free.** We did not pay a provider, so we do not charge.
+  Charging for a customer's own repetition is rent, not revenue.
+- **Paid inference costs 1 credit, reasoning 2.** Charged before the call, inside a locked
+  transaction, keyed so a retry can never double-bill.
+- **Provider outage refunds automatically.** Our failure is not the customer's cost.
+- **Running out degrades; it never blocks.** History, procedures, evidence and every record stay
+  available. Nothing is lost, nothing is held hostage.
+- **Purchases are granted by signed webhook, never by the browser.** A success callback is a claim;
+  a signed webhook is evidence. Three independent guards stop a double grant: the provider event is
+  recorded once, the payment row is state-checked, and the credit grant is itself idempotent.
+- **The price lives on the server.** The client sends a sku and nothing else. A request carrying its
+  own `amountMinor` is ignored.
+- **The contribution guardrail is a function, not a hope.** `contribution()` in
+  `src/server/billing/plans.ts` compares credit revenue against real AI cost, and the owner-only
+  panel on `/usage` shows whether the mechanism is actually profitable this month.
 
 ## How the money stays positive
 
@@ -149,10 +192,12 @@ src/
 │   ├── cost/                pricing table + budget governor
 │   ├── tools/               registry (allowlist), gateway, implementations
 │   ├── workflow/            orchestrator + deterministic rule layer
+│   ├── billing/             credits, plans, catalogue, purchase fulfilment
 │   ├── outcomes/            outcome ledger + conservative attribution
 │   └── audit/               append-only audit log
 ├── ai/                      router, providers, prompts, schemas, safety, cache
-├── integrations/assemblyai/ the only file that knows the vendor exists
+├── integrations/assemblyai/ the only file that knows the speech vendor exists
+├── integrations/payments/   payment abstraction + Razorpay and mock adapters
 ├── db/                      schema + pooled client
 └── lib/                     env, errors, logger, ids, rate limit, http
 ```
@@ -165,8 +210,12 @@ Shipped and verified: the full vertical slice — foundation, auth, voice sessio
 realtime, orchestration, context retrieval, tool calling, approval, outcome — plus the security,
 cost and portability layers. `tsc` clean, `next build` clean, 39 unit tests green.
 
-Open: monetisation/credits, analytics instrumentation, CI workflows, E2E coverage. See
-`docs/STATUS.md`.
+Verified end to end: 126 unit tests plus 44 live integration checks against a running server and a
+real Postgres, including credit atomicity under concurrency, webhook forgery refusal and the
+production guard on the development payment provider.
+
+The platform is feature-complete against the Feature Ticket List. Remaining work is operational,
+not structural: browser-level E2E for the microphone path, and a production deployment. See `docs/STATUS.md`.
 
 ## Licence
 

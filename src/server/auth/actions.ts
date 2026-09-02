@@ -7,7 +7,10 @@ import { db } from "@/db/client";
 import { assets, organizations, procedures, sites, users } from "@/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { recordAudit } from "../audit/audit";
-import { hashPassword, verifyPassword } from "./password";
+import { track } from "@/lib/analytics";
+import { ensureAccount } from "../billing/credits";
+import { hashPassword } from "./password";
+import { authenticate } from "./authenticate";
 import { createSessionCookie, destroySession } from "./session";
 import type { Role } from "../policy/roles";
 
@@ -33,7 +36,7 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
   if (!parsed.success) return { error: parsed.error.issues[0].message };
 
   try {
-    rateLimit(`signup:${parsed.data.email}`, 5, 300);
+    await rateLimit(`signup:${parsed.data.email}`, 5, 300);
   } catch {
     return { error: "Too many attempts. Wait a minute and try again." };
   }
@@ -55,6 +58,7 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
     })
     .returning();
 
+  await ensureAccount(org.id, "free");
   await seedStarterSite(org.id);
 
   await recordAudit({
@@ -66,6 +70,8 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
     resourceId: user.id,
     result: "succeeded",
   });
+
+  await track({ organizationId: org.id, userId: user.id, event: "signup_completed" });
 
   await createSessionCookie({
     userId: user.id,
@@ -85,27 +91,16 @@ export async function signIn(_prev: AuthState, formData: FormData): Promise<Auth
   });
   if (!parsed.success) return { error: "Enter your email and password." };
 
+  let session;
   try {
-    rateLimit(`signin:${parsed.data.email}`, 10, 300);
+    session = await authenticate(parsed.data.email, parsed.data.password);
   } catch {
     return { error: "Too many attempts. Wait a minute and try again." };
   }
 
-  const [user] = await db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1);
+  if (!session) return { error: "That email and password don't match." };
 
-  // Same message and similar timing whether the account exists or not.
-  if (!user || user.status !== "active" || !(await verifyPassword(parsed.data.password, user.passwordHash))) {
-    return { error: "That email and password don't match." };
-  }
-
-  await createSessionCookie({
-    userId: user.id,
-    organizationId: user.organizationId,
-    role: user.role as Role,
-    name: user.name,
-    email: user.email,
-  });
-
+  await createSessionCookie(session);
   redirect("/dashboard");
 }
 

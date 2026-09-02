@@ -130,7 +130,11 @@ export const workOrders = pgTable(
   "work_orders",
   {
     id: uuid("id").primaryKey().defaultRandom(),
+    // Global sequence, internal only. Never shown to a customer.
     number: serial("number").notNull(),
+    // What the customer sees. Per-organisation, starting at 1, so a tenant
+    // cannot infer platform-wide volume from their own work order numbers.
+    orgNumber: integer("org_number").notNull().default(0),
     organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
     assetId: uuid("asset_id").notNull().references(() => assets.id, { onDelete: "cascade" }),
     createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
@@ -274,6 +278,120 @@ export const aiUsage = pgTable(
   ],
 );
 
+/**
+ * Commercial state. Credits are the stable abstraction between what the
+ * customer buys and what a request costs us: provider prices can move without
+ * repricing the product.
+ */
+export const organizationCredits = pgTable("organization_credits", {
+  organizationId: uuid("organization_id")
+    .primaryKey()
+    .references(() => organizations.id, { onDelete: "cascade" }),
+  plan: text("plan").notNull().default("free"),
+  balance: integer("balance").notNull().default(0),
+  includedPerPeriod: integer("included_per_period").notNull().default(0),
+  periodStart: timestamp("period_start", { withTimezone: true }).notNull().defaultNow(),
+  lifetimeGranted: integer("lifetime_granted").notNull().default(0),
+  lifetimeConsumed: integer("lifetime_consumed").notNull().default(0),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+/** Append-only. Every credit movement is explainable after the fact. */
+export const creditLedger = pgTable(
+  "credit_ledger",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull(),
+    userId: uuid("user_id"),
+    sessionId: uuid("session_id"),
+    // grant | consume | refund | period_reset | purchase
+    reason: text("reason").notNull(),
+    delta: integer("delta").notNull(),
+    balanceAfter: integer("balance_after").notNull(),
+    idempotencyKey: text("idempotency_key").notNull(),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("credit_ledger_idempotency_unique").on(t.idempotencyKey),
+    index("credit_ledger_org_idx").on(t.organizationId, t.createdAt),
+  ],
+);
+
+/**
+ * Money. The provider is a record of what happened elsewhere; this table is our
+ * own books, and the two are reconciled rather than assumed to agree.
+ */
+export const payments = pgTable(
+  "payments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    provider: text("provider").notNull(),
+    providerOrderId: text("provider_order_id").notNull(),
+    providerPaymentId: text("provider_payment_id"),
+    // credit_pack | subscription
+    purpose: text("purpose").notNull(),
+    sku: text("sku").notNull(),
+    creditsGranted: integer("credits_granted").notNull().default(0),
+    // Stored in the smallest currency unit, as integers. Never floats for money.
+    amountMinor: integer("amount_minor").notNull(),
+    currency: text("currency").notNull().default("INR"),
+    // created | paid | failed | refunded
+    status: text("status").notNull().default("created"),
+    fulfilledAt: timestamp("fulfilled_at", { withTimezone: true }),
+    metadata: jsonb("metadata").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [
+    uniqueIndex("payments_provider_order_unique").on(t.provider, t.providerOrderId),
+    index("payments_org_idx").on(t.organizationId, t.createdAt),
+  ],
+);
+
+/** Webhook replay protection. A provider may deliver the same event many times. */
+export const webhookEvents = pgTable(
+  "webhook_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    provider: text("provider").notNull(),
+    eventId: text("event_id").notNull(),
+    eventType: text("event_type").notNull(),
+    processedAt: timestamp("processed_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("webhook_events_unique").on(t.provider, t.eventId)],
+);
+
+/**
+ * Rate limit counters, in the database rather than in memory.
+ *
+ * On serverless every request can land on a fresh instance, so an in-process
+ * Map means the limit is silently per-instance — which is the same as no limit
+ * under load. Since our abuse and cost controls depend on it, it has to be
+ * shared state.
+ */
+export const rateLimits = pgTable("rate_limits", {
+  key: text("key").primaryKey(),
+  count: integer("count").notNull().default(0),
+  resetAt: timestamp("reset_at", { withTimezone: true }).notNull(),
+});
+
+export const analyticsEvents = pgTable(
+  "analytics_events",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    // Hashed, never raw. Telemetry must not carry personal data.
+    orgHash: text("org_hash").notNull(),
+    userHash: text("user_hash").notNull(),
+    event: text("event").notNull(),
+    properties: jsonb("properties").$type<Record<string, unknown>>().notNull().default({}),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("analytics_event_idx").on(t.event, t.createdAt)],
+);
+
 export type Asset = typeof assets.$inferSelect;
 export type Site = typeof sites.$inferSelect;
 export type Incident = typeof incidents.$inferSelect;
@@ -283,3 +401,5 @@ export type WorkOrder = typeof workOrders.$inferSelect;
 export type VoiceSession = typeof voiceSessions.$inferSelect;
 export type Outcome = typeof outcomes.$inferSelect;
 export type UserRow = typeof users.$inferSelect;
+export type OrganizationCredits = typeof organizationCredits.$inferSelect;
+export type Payment = typeof payments.$inferSelect;

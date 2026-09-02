@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Button, Legend, Panel, Tag } from "./ui";
 import { speak, stopSpeaking, useVoiceStream } from "./useVoiceStream";
+import { detectVoiceIntent, forSpeech, isBargeIn, isSelfEcho } from "./conversation";
 
 /**
  * The hero screen. Everything on it answers one of five questions:
@@ -41,6 +42,8 @@ type TurnResult = {
     costUsd: number;
     budget: { spentSession: number; limitSession: number };
     degraded: boolean;
+    creditsCharged: number;
+    creditBalance: number | null;
   };
 };
 
@@ -65,7 +68,14 @@ const EXAMPLES = [
   "Create an urgent work order for the bearing.",
 ];
 
-export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
+export default function VoiceJob({
+  firstRun,
+  voiceEnabled,
+}: {
+  firstRun: boolean;
+  /** Resolved on the server. False when no speech provider is configured. */
+  voiceEnabled: boolean;
+}) {
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [stage, setStage] = useState<Stage>("idle");
   const [lines, setLines] = useState<Line[]>([]);
@@ -79,6 +89,9 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
   const [muted, setMuted] = useState(false);
 
   const startedAt = useRef<number | null>(null);
+  const speakingRef = useRef<string | null>(null);
+  const lastSpokenRef = useRef<string>("");
+  const proposalRef = useRef<Proposal | null>(null);
   const transcriptEnd = useRef<HTMLDivElement | null>(null);
 
   const ensureSession = useCallback(async (): Promise<string> => {
@@ -124,7 +137,7 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
         const result = json.data as TurnResult;
         setTurn(result);
         setLines((l) => [...l, { who: "fieldpilot", text: result.spoken, at: Date.now() }]);
-        if (!muted) speak(result.spoken);
+        say(result.spoken);
 
         if (result.proposal) {
           setProposal(result.proposal);
@@ -143,10 +156,54 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
     [busy, ensureSession, muted],
   );
 
+  // Say it aloud, and remember what we said so the microphone picking it back
+  // up can be recognised as our own voice rather than answered as a question.
+  const say = useCallback(
+    (text: string) => {
+      lastSpokenRef.current = text;
+      if (muted) return;
+      const spoken = forSpeech(text);
+      speakingRef.current = spoken;
+      speak(spoken, () => {
+        speakingRef.current = null;
+      });
+    },
+    [muted],
+  );
+
   const voice = useVoiceStream({
-    onFinalTurn: submitTurn,
+    onFinalTurn: (transcript) => {
+      // 1. Our own speech, echoed back by the room. Discard it silently —
+      //    answering yourself is the fastest way to lose a user's trust.
+      if (isSelfEcho(transcript, speakingRef.current, Boolean(speakingRef.current))) return;
+
+      // 2. A short spoken command, resolved on the device. No model call, no
+      //    credit, no latency — and it means hands never leave the job.
+      const intent = detectVoiceIntent(transcript);
+      if (intent.kind === "approve" && proposalRef.current) return void decide("approve");
+      if (intent.kind === "reject" && proposalRef.current) return void decide("reject");
+      if (intent.kind === "repeat") return say(lastSpokenRef.current);
+      if (intent.kind === "stop") {
+        stopSpeaking();
+        speakingRef.current = null;
+        return;
+      }
+
+      void submitTurn(transcript);
+    },
+    // 3. Barge-in. The moment the technician starts speaking, we stop talking.
+    onPartial: (partial) => {
+      if (speakingRef.current && isBargeIn(partial)) {
+        stopSpeaking();
+        speakingRef.current = null;
+      }
+    },
     onError: (message) => setNotice(message),
   });
+
+  useEffect(() => {
+    proposalRef.current = proposal;
+  }, [proposal]);
 
   const decide = async (decision: "approve" | "reject") => {
     if (!proposal || busy) return;
@@ -187,7 +244,7 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
         ? `${json.data.summary} — already recorded, no duplicate created.`
         : `Done. ${json.data.summary}.`;
       setLines((l) => [...l, { who: "fieldpilot", text: confirmation, at: Date.now() }]);
-      if (!muted) speak(confirmation);
+      say(confirmation);
     } catch (error) {
       setNotice((error as Error).message || "The action didn't complete. Nothing was changed.");
       setStage("awaiting");
@@ -220,7 +277,7 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
     transcriptEnd.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [lines.length, voice.partial]);
 
-  const live = voice.state === "listening";
+  const live = voiceEnabled && voice.state === "listening";
   const stageIndex = STAGES.findIndex((s) => s.key === stage);
 
   return (
@@ -235,7 +292,7 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
                 : "No asset identified yet"}
             </Legend>
             <p className={`text-sm font-medium ${live ? "listening" : ""}`}>
-              {stageLabel(stage, voice.state)}
+              {voiceEnabled ? stageLabel(stage, voice.state) : "Ready — type what you\u2019d say."}
             </p>
           </div>
           <div className="flex items-center gap-2">
@@ -268,13 +325,31 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
         ) : null}
       </div>
 
+      {!voiceEnabled ? (
+        <div className="panel border-signal-500 p-3 text-sm">
+          <p className="legend">Typing mode</p>
+          <p>
+            No speech provider is configured on this deployment, so the microphone is switched off.
+            Type below instead — it runs the identical pipeline: same asset resolution, same evidence,
+            same approval step, same records.
+          </p>
+          <p className="mt-1 text-xs text-[var(--muted)]">
+            To enable voice, set ASSEMBLYAI_API_KEY and restart. Run <span className="data">npm run doctor</span> to check.
+          </p>
+        </div>
+      ) : null}
+
       {notice ? (
         <div className="rise panel border-warn-500 p-3 text-sm text-warn-500">{notice}</div>
       ) : null}
 
       {/* --- controls -------------------------------------------------------- */}
       <div className="flex flex-wrap items-center gap-2">
-        {live || voice.state === "reconnecting" ? (
+        {!voiceEnabled ? (
+          <Button size="lg" disabled title="No speech provider configured">
+            Voice unavailable
+          </Button>
+        ) : live || voice.state === "reconnecting" ? (
           <Button variant="secondary" size="lg" onClick={voice.stop}>Stop listening</Button>
         ) : (
           <Button size="lg" onClick={() => void voice.start()} disabled={busy}>
@@ -300,7 +375,8 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
         <input
           value={typed}
           onChange={(e) => setTyped(e.target.value)}
-          placeholder="Or type what you'd say…"
+          placeholder={voiceEnabled ? "Or type what you'd say…" : "Type what you'd say…"}
+          autoFocus={!voiceEnabled}
           className="flex-1 rounded-[4px] border border-[var(--line)] bg-[var(--surface)] px-3 py-2.5 text-sm"
         />
         <Button type="submit" variant="secondary" disabled={busy || !typed.trim()}>Send</Button>
@@ -400,6 +476,12 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
           <p className="data mt-1 text-[11px] text-[var(--muted)]">
             {proposal.toolName} · risk {proposal.risk} · reversible
           </p>
+          {voiceEnabled ? (
+            <p className="mt-2 text-xs text-[var(--muted)]">
+              Say <strong>&ldquo;yes&rdquo;</strong> to approve or <strong>&ldquo;no&rdquo;</strong> to drop it —
+              you don&apos;t need to touch the screen.
+            </p>
+          ) : null}
           <div className="mt-4 flex gap-2">
             <Button size="lg" onClick={() => void decide("approve")} disabled={busy}>
               {busy ? "Recording…" : "Approve"}
@@ -435,6 +517,10 @@ export default function VoiceJob({ firstRun }: { firstRun: boolean }) {
             path {turn.meta.path}
             {turn.meta.model ? ` · ${turn.meta.model}` : ""} · {turn.meta.latencyMs} ms · ${turn.meta.costUsd.toFixed(5)} this turn · $
             {turn.meta.budget.spentSession.toFixed(4)} of ${turn.meta.budget.limitSession.toFixed(2)} session budget
+            {turn.meta.creditsCharged > 0
+              ? ` · ${turn.meta.creditsCharged} credit${turn.meta.creditsCharged > 1 ? "s" : ""}`
+              : " · free path, no credit spent"}
+            {turn.meta.creditBalance !== null ? ` · ${turn.meta.creditBalance} left` : ""}
             {turn.meta.degraded ? " · degraded to the cheaper path" : ""}
           </p>
         </div>

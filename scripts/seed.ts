@@ -1,10 +1,11 @@
-import "dotenv/config";
+import "../src/lib/load-env";
 import { eq } from "drizzle-orm";
 import { db, sql } from "../src/db/client";
 import {
   assets, incidents, measurements, organizations, procedures, sites, users, workOrders,
 } from "../src/db/schema";
 import { hashPassword } from "../src/server/auth/password";
+import { ensureAccount } from "../src/server/billing/credits";
 
 /**
  * Demo data with a real story in it: Pump 3 has a history that makes the
@@ -17,9 +18,24 @@ const DEMO_PASSWORD = "fieldpilot123";
 async function main() {
   console.log("Seeding FieldPilot demo data…");
 
-  const existing = await db.select().from(users).where(eq(users.email, DEMO_EMAIL)).limit(1);
-  if (existing.length) {
-    console.log(`Demo user already exists (${DEMO_EMAIL}). Nothing to do.`);
+  // Re-runnable: an existing demo organisation is topped up rather than
+  // duplicated, so upgrading the seed does not require dropping the database.
+  const [existing] = await db.select().from(users).where(eq(users.email, DEMO_EMAIL)).limit(1);
+  if (existing) {
+    await db
+      .insert(users)
+      .values([
+        { organizationId: existing.organizationId, email: "owner@fieldpilot.app", name: "Dana Okafor", role: "admin", passwordHash: await hashPassword(DEMO_PASSWORD) },
+        { organizationId: existing.organizationId, email: "supervisor@fieldpilot.app", name: "Priya Nair", role: "supervisor", passwordHash: await hashPassword(DEMO_PASSWORD) },
+      ])
+      .onConflictDoNothing();
+
+    await ensureAccount(existing.organizationId, "free");
+
+    console.log(`Demo organisation already present. Accounts verified:`);
+    console.log(`  ${DEMO_EMAIL} / ${DEMO_PASSWORD}  (technician)`);
+    console.log(`  supervisor@fieldpilot.app / ${DEMO_PASSWORD}`);
+    console.log(`  owner@fieldpilot.app / ${DEMO_PASSWORD}`);
     await sql.end();
     return;
   }
@@ -39,11 +55,21 @@ async function main() {
 
   await db.insert(users).values({
     organizationId: org.id,
+    email: "owner@fieldpilot.app",
+    name: "Dana Okafor",
+    role: "admin",
+    passwordHash: await hashPassword(DEMO_PASSWORD),
+  });
+
+  await db.insert(users).values({
+    organizationId: org.id,
     email: "supervisor@fieldpilot.app",
     name: "Priya Nair",
     role: "supervisor",
     passwordHash: await hashPassword(DEMO_PASSWORD),
   });
+
+  await ensureAccount(org.id, "free");
 
   const [site14, site7] = await db
     .insert(sites)
@@ -124,6 +150,7 @@ async function main() {
   console.log(`  Organisation : ${org.name}`);
   console.log(`  Sign in      : ${DEMO_EMAIL} / ${DEMO_PASSWORD}`);
   console.log(`  Supervisor   : supervisor@fieldpilot.app / ${DEMO_PASSWORD}`);
+  console.log(`  Owner        : owner@fieldpilot.app / ${DEMO_PASSWORD}`);
   console.log('\nDemo line: "I\'m at Site 14. Pump 3 is vibrating again."\n');
 
   await sql.end();

@@ -9,6 +9,9 @@ import { requireSession } from "@/server/auth/session";
 import { can } from "@/server/policy/roles";
 import { recordAudit } from "@/server/audit/audit";
 import { endSession } from "@/server/workflow/orchestrator";
+import { env } from "@/lib/env";
+import { lt, sql as raw } from "drizzle-orm";
+import { track } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -22,10 +25,24 @@ export async function POST(request: Request) {
   try {
     const session = await requireSession();
     if (!can(session.role, "voice:use")) throw new AppError("FORBIDDEN", "role cannot use voice");
-    rateLimit(`session-create:${session.userId}`, 30, 60);
+    await rateLimit(`session-create:${session.userId}`, 30, 60);
 
     const body = createSchema.safeParse(await request.json().catch(() => ({})));
     if (!body.success) throw new AppError("VALIDATION_FAILED", "bad session payload");
+
+    // A browser that closes without ending its session would otherwise leave an
+    // "active" row forever, and the resume rule below would hand the technician
+    // back a dead session on every attempt. Expire the stale ones first.
+    await db
+      .update(voiceSessions)
+      .set({ status: "ended", endedAt: new Date(), failureReason: "expired: exceeded max duration" })
+      .where(
+        and(
+          eq(voiceSessions.userId, session.userId),
+          eq(voiceSessions.status, "active"),
+          lt(voiceSessions.startedAt, new Date(Date.now() - env.VOICE_SESSION_MAX_SECONDS * 1000)),
+        ),
+      );
 
     // One active session per technician: reconnecting resumes rather than forking.
     const [existing] = await db
@@ -49,6 +66,8 @@ export async function POST(request: Request) {
         provider: "assemblyai",
       })
       .returning();
+
+    await track({ organizationId: session.organizationId, userId: session.userId, event: "voice_session_started" });
 
     await recordAudit({
       organizationId: session.organizationId,

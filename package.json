@@ -19,7 +19,11 @@
     "db:studio": "drizzle-kit studio",
     "seed": "tsx scripts/seed.ts",
     "export:test": "tsx scripts/portability-test.ts",
-    "setup": "npm install && npm run db:push && npm run seed"
+    "setup": "npm install && npm run db:push && npm run seed",
+    "doctor": "tsx scripts/doctor.ts",
+    "smoke": "tsx scripts/smoke.ts",
+    "verify": "npm run typecheck && npm test",
+    "loadtest": "tsx scripts/loadtest.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.5",

@@ -62,7 +62,7 @@ export async function listOutcomes(organizationId: string, limit = 25) {
       evidence: outcomes.evidence,
       assetName: assets.name,
       assetCode: assets.assetCode,
-      workOrderNumber: workOrders.number,
+      workOrderNumber: workOrders.orgNumber,
     })
     .from(outcomes)
     .leftJoin(assets, eq(assets.id, outcomes.assetId))

@@ -1,21 +1,35 @@
-MIT License
+FieldPilot — Proprietary Software Licence
+Copyright (c) 2026 Kartikeya Mishra. All rights reserved.
 
-Copyright (c) 2026 Kartikeya Mishra
+This software and its source code, architecture, prompts, workflows, database
+schema, designs and documentation (together, the "Software") are the exclusive
+intellectual property of Kartikeya Mishra ("the Owner").
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+NO LICENCE IS GRANTED BY POSSESSION OF THIS CODE.
 
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
+Except where a separate written agreement signed by the Owner states otherwise,
+you may NOT:
 
+  - use the Software, in whole or in part, for any commercial purpose;
+  - copy, modify, merge, publish, distribute, sublicense or sell copies of it;
+  - host it as a service, whether paid or free;
+  - remove or alter this notice or any ownership marking;
+  - use it to train a machine learning model.
+
+You MAY, without a separate agreement:
+
+  - read the source for evaluation;
+  - run it locally for the sole purpose of evaluating whether to obtain a licence.
+
+COMMERCIAL LICENSING
+Commercial use requires a paid licence. Contact workmailkartikeya@gmail.com.
+See COMMERCIAL-LICENCE.md for tiers and terms.
+
+CONTRIBUTIONS
+Any contribution submitted for inclusion is assigned to the Owner, who retains
+all rights in the resulting work.
+
+NO WARRANTY
 THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
+IMPLIED. IN NO EVENT SHALL THE OWNER BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY ARISING FROM THE SOFTWARE OR ITS USE.

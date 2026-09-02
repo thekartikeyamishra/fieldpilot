@@ -43,6 +43,16 @@ jobs:
         run: npm run seed
       - name: Build
         run: npm run build
+      - name: Start the app
+        run: |
+          npm start &
+          for i in $(seq 1 30); do
+            if curl -sf -o /dev/null http://localhost:3000/api/health; then echo "up"; exit 0; fi
+            sleep 2
+          done
+          echo "server did not become healthy in 60s"; exit 1
+      - name: End-to-end smoke test
+        run: npm run smoke
 
   secrets:
     runs-on: ubuntu-latest

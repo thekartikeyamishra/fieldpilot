@@ -1,11 +1,12 @@
 import "server-only";
 import { and, eq, gte, sql as raw, type SQL } from "drizzle-orm";
-import { db } from "@/db/client";
+import { db, sql as client } from "@/db/client";
 import { aiUsage, voiceSessions } from "@/db/schema";
 import { env } from "@/lib/env";
 import { AppError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import { costOf, estimateTokens } from "./pricing";
+import { track } from "@/lib/analytics";
 
 /**
  * Every paid inference passes through here first. There is no code path that
@@ -49,6 +50,27 @@ async function spend(where: SQL | undefined): Promise<number> {
   return Number(row?.total ?? 0);
 }
 
+/**
+ * Serialises the paid path for one session.
+ *
+ * checkBudget reads spend and recordUsage writes it, so two simultaneous turns
+ * could both read the same pre-spend total and both pass a ceiling they jointly
+ * exceed. Credits are charged atomically and first, which bounds the damage to
+ * roughly one extra call — but "roughly bounded" is not a cost control.
+ *
+ * A transaction-scoped advisory lock keyed on the session costs nothing in the
+ * normal case, because concurrent turns within a single voice session are
+ * already an anomaly rather than a workload.
+ */
+export async function withSessionBudgetLock<T>(sessionId: string, run: () => Promise<T>): Promise<T> {
+  try {
+    await client`select pg_advisory_lock(hashtext(${`budget:${sessionId}`}))`;
+    return await run();
+  } finally {
+    await client`select pg_advisory_unlock(hashtext(${`budget:${sessionId}`}))`.catch(() => {});
+  }
+}
+
 export async function checkBudget(q: BudgetQuery): Promise<BudgetDecision> {
   const [session] = await db.select().from(voiceSessions).where(eq(voiceSessions.id, q.sessionId)).limit(1);
   if (!session) throw new AppError("NOT_FOUND", "voice session not found");
@@ -74,6 +96,12 @@ export async function checkBudget(q: BudgetQuery): Promise<BudgetDecision> {
 
   if (stop) {
     log.warn("budget_stop", { spent });
+    await track({
+      organizationId: q.organizationId,
+      userId: q.userId,
+      event: "budget_ceiling_hit",
+      properties: { sessionSpend, userSpend, orgSpend },
+    });
     return { verdict: "stop", tier: "fast", reason: "usage allowance reached", spent, remainingSession };
   }
 

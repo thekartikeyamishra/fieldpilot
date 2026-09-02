@@ -44,6 +44,38 @@ const schema = z.object({
   VOICE_MAX_TOOL_CALLS_PER_SESSION: num(12),
   MAX_TRANSCRIPT_CHARS: num(1200),
 
+  CREDITS_FREE_PER_MONTH: num(25),
+  CREDITS_PRO_PER_MONTH: num(600),
+  CREDIT_PRICE_USD: num(0.0136),
+  CREDITS_PER_REASONING_TURN: num(2),
+  CREDITS_PER_FAST_TURN: num(1),
+
+  // --- Licensing: hosted needs no key; self-hosted does --------------------
+  DEPLOYMENT_MODE: z.enum(["hosted", "self-hosted"]).default("hosted"),
+  LICENSE_KEY: z.string().default(""),
+  LICENSE_SIGNING_SECRET: z.string().default("fieldpilot-dev-verification-secret"),
+
+  // --- Sarvam: Indian-language speech and inference -----------------------
+  SARVAM_API_KEY: z.string().default(""),
+  SARVAM_STT_MODEL: z.string().default("saaras:v4"),
+  SARVAM_TTS_MODEL: z.string().default("bulbul:v3"),
+  SARVAM_TTS_SPEAKER: z.string().default("anushka"),
+  SARVAM_LLM_BASE_URL: z.string().default("https://api.sarvam.ai/v1"),
+  SARVAM_LLM_MODEL: z.string().default("sarvam-105b"),
+  /** Pay for speech output only where the browser has no usable voice. */
+  SARVAM_TTS_ENABLED: bool(true),
+
+  // razorpay | mock. "mock" fulfils instantly and is for local development only.
+  PAYMENTS_PROVIDER: z.enum(["razorpay", "mock"]).default("mock"),
+  PAYMENTS_CURRENCY: z.string().default("INR"),
+  RAZORPAY_KEY_ID: z.string().default(""),
+  RAZORPAY_KEY_SECRET: z.string().default(""),
+  RAZORPAY_WEBHOOK_SECRET: z.string().default(""),
+
+  /** Proxies in front of the app that append to x-forwarded-for. Vercel = 1. */
+  TRUSTED_PROXY_HOPS: num(1),
+  RATE_LIMIT_AUTH_PER_IP: num(30),
+
   RATE_LIMIT_REQUESTS: num(60),
   RATE_LIMIT_WINDOW_SECONDS: num(60),
 

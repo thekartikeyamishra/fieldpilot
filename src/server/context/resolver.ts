@@ -83,16 +83,13 @@ export async function resolveContext(params: {
 }): Promise<ResolvedContext> {
   const { organizationId, utterance } = params;
 
-  // Tenant scope is part of every query, never a filter applied afterwards.
-  const orgAssets = await db
-    .select()
-    .from(assets)
-    .where(
-      params.siteId
-        ? and(eq(assets.organizationId, organizationId), eq(assets.siteId, params.siteId))
-        : eq(assets.organizationId, organizationId),
-    )
-    .limit(500);
+  // Candidate selection happens in SQL, not in memory.
+  //
+  // The previous version loaded the first 500 assets and scored them in Node.
+  // For an organisation with 10,000 assets that silently scored an arbitrary
+  // 5% of them, so "Pump 3" could resolve to nothing while Pump 3 sat in the
+  // database. Wrong answers at scale are worse than slow ones.
+  const orgAssets = await loadCandidates(organizationId, params.siteId ?? null, utterance);
 
   let asset: Asset | null = null;
   let candidates: ResolvedContext["candidates"] = [];
@@ -220,6 +217,40 @@ export function rankProcedures(list: Procedure[], utterance: string): Procedure[
     })
     .sort((a, b) => b.score - a.score || a.p.reference.localeCompare(b.p.reference))
     .map((x) => x.p);
+}
+
+/**
+ * Narrow to plausible assets in the database, then score the short list.
+ * Bounded work regardless of tenant size.
+ */
+async function loadCandidates(
+  organizationId: string,
+  siteId: string | null,
+  utterance: string,
+): Promise<Asset[]> {
+  const scoped = siteId
+    ? and(eq(assets.organizationId, organizationId), eq(assets.siteId, siteId))
+    : eq(assets.organizationId, organizationId);
+
+  // Tokens survive script and language: "पंप 3" and "pump three" both yield "3".
+  const normalised = normaliseSpokenNumbers(utterance.toLowerCase());
+  const tokens = Array.from(
+    new Set((normalised.match(/[a-z][a-z0-9-]{1,}|\d{1,6}/g) ?? []).filter((t) => t.length >= 2)),
+  ).slice(0, 12);
+
+  if (tokens.length) {
+    const matches = await db
+      .select()
+      .from(assets)
+      .where(and(scoped, or(...tokens.flatMap((t) => [ilike(assets.name, `%${t}%`), ilike(assets.assetCode, `%${t}%`)]))))
+      .limit(60);
+    if (matches.length) return matches;
+  }
+
+  // Nothing matched textually. Return a small slice only so a tiny organisation
+  // still resolves by type alone; a large one correctly falls through to
+  // "which asset?" rather than guessing from an arbitrary 500.
+  return db.select().from(assets).where(scoped).limit(25);
 }
 
 export async function listAssetsForOrg(organizationId: string, limit = 100) {

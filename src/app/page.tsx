@@ -66,8 +66,24 @@ export default async function Landing() {
         <p className="legend mt-4">First real work action in under two minutes · no card</p>
       </div>
 
-      <footer className="legend border-t border-[var(--line)] pt-4">
-        Built on AssemblyAI streaming speech-to-text · AI proposes, policy authorises, you approve
+      <footer className="border-t border-[var(--line)] pt-4">
+        <p className="legend">
+          Built on AssemblyAI streaming speech-to-text · AI proposes, policy authorises, you approve
+        </p>
+        <nav className="mt-3 flex flex-wrap gap-x-4 gap-y-1">
+          {[
+            { href: "/about", label: "About" },
+            { href: "/pricing", label: "Pricing" },
+            { href: "/terms", label: "Terms" },
+            { href: "/privacy", label: "Privacy" },
+            { href: "/refunds", label: "Refunds" },
+            { href: "/contact", label: "Contact" },
+          ].map((item) => (
+            <Link key={item.href} href={item.href} className="legend hover:text-[var(--ink)]">
+              {item.label}
+            </Link>
+          ))}
+        </nav>
       </footer>
     </main>
   );

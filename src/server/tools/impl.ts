@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql as raw } from "drizzle-orm";
 import { db } from "@/db/client";
 import { assets, incidents, measurements, procedures, workOrders } from "@/db/schema";
 import { AppError } from "@/lib/errors";
@@ -124,9 +124,24 @@ export const executors: Record<
 
   create_work_order: async (args, ctx) => {
     const asset = await ownedAsset(ctx.organizationId, ctx.assetId);
+
+    // Per-tenant numbering. A global sequence would tell every customer roughly
+    // how much volume the whole platform does, which is both a disclosure we
+    // never agreed to and a bad look on an invoice. The advisory lock serialises
+    // concurrent creates within one organisation only.
+    const orgNumber = await db.transaction(async (tx) => {
+      await tx.execute(raw`select pg_advisory_xact_lock(hashtext(${ctx.organizationId}))`);
+      const rows = await tx.execute<{ next: number }>(raw`
+        select coalesce(max(org_number), 0) + 1 as next
+        from work_orders where organization_id = ${ctx.organizationId}
+      `);
+      return Number((rows[0] as { next: number } | undefined)?.next ?? 1);
+    });
+
     const [row] = await db
       .insert(workOrders)
       .values({
+        orgNumber,
         organizationId: ctx.organizationId,
         assetId: asset.id,
         createdBy: ctx.userId,
@@ -139,7 +154,7 @@ export const executors: Record<
       })
       .returning();
     return {
-      summary: `Work order #${row.number} created as ${row.priority}`,
+      summary: `Work order #${row.orgNumber} created as ${row.priority}`,
       data: { workOrder: row },
       resourceType: "work_order",
       resourceId: row.id,
@@ -165,7 +180,7 @@ export const executors: Record<
       .returning();
 
     return {
-      summary: `Work order #${row.number} is now ${row.status}`,
+      summary: `Work order #${row.orgNumber} is now ${row.status}`,
       data: { workOrder: row },
       resourceType: "work_order",
       resourceId: row.id,

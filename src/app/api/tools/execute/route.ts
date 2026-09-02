@@ -9,6 +9,7 @@ import { rateLimit } from "@/lib/rate-limit";
 import { requireSession } from "@/server/auth/session";
 import { executeApproved } from "@/server/tools/gateway";
 import { recordOutcome } from "@/server/outcomes/ledger";
+import { track, trackAha } from "@/lib/analytics";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -25,7 +26,7 @@ const schema = z.object({
 export async function POST(request: Request) {
   try {
     const session = await requireSession();
-    rateLimit(`tool-exec:${session.userId}`, 40, 60);
+    await rateLimit(`tool-exec:${session.userId}`, 40, 60);
 
     const parsed = schema.safeParse(await request.json().catch(() => null));
     if (!parsed.success) throw new AppError("VALIDATION_FAILED", "bad approval payload");
@@ -36,7 +37,17 @@ export async function POST(request: Request) {
       decision: parsed.data.decision,
     });
 
-    if ("rejected" in result) return ok({ rejected: true });
+    if ("rejected" in result) {
+      await track({ organizationId: session.organizationId, userId: session.userId, event: "action_rejected" });
+      return ok({ rejected: true });
+    }
+
+    await track({
+      organizationId: session.organizationId,
+      userId: session.userId,
+      event: "action_approved",
+      properties: { tool: result.toolName, duplicate: result.duplicate },
+    });
 
     // Record the outcome only for real work, and only once per tool call.
     let outcome = null;
@@ -62,6 +73,20 @@ export async function POST(request: Request) {
           toolName: result.toolName,
           evidence: parsed.data.evidence ?? [],
           durationMs: vs ? Date.now() - vs.startedAt.getTime() : 0,
+        });
+
+        const secondsToValue = vs ? (Date.now() - vs.startedAt.getTime()) / 1000 : 0;
+        await track({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          event: "outcome_recorded",
+          properties: { tool: result.toolName, minutesReturned: outcome.minutesReturned },
+        });
+        await trackAha({
+          organizationId: session.organizationId,
+          userId: session.userId,
+          secondsToValue,
+          toolName: result.toolName,
         });
       }
     }

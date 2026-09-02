@@ -1,6 +1,7 @@
 import VoiceJob from "@/components/VoiceJob";
 import { requireSession } from "@/server/auth/session";
 import { Legend } from "@/components/ui";
+import { voiceProvider } from "@/integrations/assemblyai/voice-provider";
 
 export const dynamic = "force-dynamic";
 
@@ -12,6 +13,9 @@ export default async function JobPage({
   const session = await requireSession();
   const params = await searchParams;
   const firstRun = params.first === "1";
+
+  // Checked on the server so the UI never offers a button that cannot work.
+  const voiceEnabled = voiceProvider.isConfigured();
 
   return (
     <div className="space-y-5">
@@ -26,7 +30,7 @@ export default async function JobPage({
         </p>
       </div>
 
-      <VoiceJob firstRun={firstRun} />
+      <VoiceJob firstRun={firstRun} voiceEnabled={voiceEnabled} />
     </div>
   );
 }

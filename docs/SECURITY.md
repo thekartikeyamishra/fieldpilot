@@ -19,6 +19,14 @@ enforces it, so the claim is auditable rather than aspirational.
 | Rate limits on auth, sessions, turns, tool execution, token minting | `src/lib/rate-limit.ts` |
 | Cost ceilings per session, per user-day, per org-month; hard caps on duration, calls, input size | `src/server/cost/governor.ts` |
 | Secret custody: provider key server-side only; browser gets a 60s single-use token | `src/integrations/assemblyai/` |
+| Credit consumption atomic under concurrency (`SELECT … FOR UPDATE`), replay-safe by key | `src/server/billing/credits.ts` |
+| Unit economics restricted to owners | `src/app/api/billing/route.ts` |
+| Payment amount and credit count come from the server catalogue, never the request | `src/server/billing/catalog.ts`, `checkout/route.ts` |
+| Webhook signature verified over the raw body before any parsing, constant-time | `src/integrations/payments/razorpay.ts` |
+| Credit grant triple-guarded: event recorded once, payment state-checked, grant idempotent | `src/server/billing/purchase.ts` |
+| Provider amount mismatch marks the payment failed and grants nothing | `src/server/billing/purchase.ts` |
+| Only an owner can spend the organisation's money | `src/app/api/billing/checkout/route.ts` |
+| Development payment provider refused at runtime in production | `src/integrations/payments/index.ts` |
 | Append-only audit log: who, what, when, on what, result | `src/server/audit/audit.ts` |
 | Zero-PII telemetry: salted-hashed identifiers in logs | `src/lib/ids.ts`, `logger.ts` |
 | Human-language errors with a request id; no internals leaked | `src/lib/errors.ts`, `http.ts` |

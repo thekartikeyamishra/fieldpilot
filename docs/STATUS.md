@@ -1,7 +1,8 @@
 # Implementation status
 
-Last verified: `tsc --noEmit` clean · `next build` clean (14 routes) · 39 unit tests green ·
-schema pushed to Postgres 16 · seed loaded.
+Last verified: `tsc --noEmit` clean · `next build` clean · **126 unit tests green** ·
+**44/44 live smoke checks green** against a running server and a real Postgres 16 ·
+versioned migration generated · seed loaded.
 
 ## Built and working
 
@@ -29,21 +30,68 @@ schema pushed to Postgres 16 · seed loaded.
 | One-click export with checksums | done | `src/app/api/export/` |
 | Health check | done | `src/app/api/health/` |
 | Landing, auth, dashboard, assets, work pages | done | `src/app/` |
-| Unit tests (39) | done | `tests/unit/` |
+| Unit tests (126) | done | `tests/unit/` |
+| Streaming export, constant memory, explicit columns | done | `src/server/export/stream.ts` |
+| Spoof-resistant client IP + per-IP auth throttling | done | `src/lib/client-ip.ts` |
+| Per-session budget lock | done | `src/server/cost/governor.ts` |
+| Load-test harness | done | `scripts/loadtest.ts` |
+| Durable rate limiting (Postgres, atomic, concurrency-proven) | done | `src/lib/rate-limit.ts` |
+| Conversation layer: echo suppression, barge-in, voice approval | done | `src/components/conversation.ts` |
+| Proprietary licence + self-hosted licence verification | done | `LICENSE`, `src/server/licensing/` |
+| Per-tenant work order numbering | done | `src/server/tools/impl.ts` |
+| Production audit: 10 defects found and fixed | done | `docs/PRODUCTION-AUDIT.md` |
+| Language routing, 10 Indian languages, code-mix token extraction | done | `src/server/i18n/languages.ts` |
+| Sarvam adapter: utterance STT, Bulbul TTS with phrase cache, spoken-output cap | done | `src/integrations/speech/sarvam.ts` |
+| Per-language turn cost model + margin guardrail test | done | `src/server/billing/language-economics.ts` |
+| Payment abstraction + Razorpay adapter + dev mock | done | `src/integrations/payments/` |
+| Credit pack catalogue, server-side pricing, profitability gate | done | `src/server/billing/catalog.ts` |
+| Checkout endpoint, signed webhook, triple-guarded fulfilment | done | `src/app/api/billing/`, `src/server/billing/purchase.ts` |
+| Purchase UI with honest "you have not been charged" failure copy | done | `src/components/BuyCredits.tsx` |
+| Credits: atomic consumption, replay-safe, refund on provider failure | done | `src/server/billing/credits.ts` |
+| Plans, credit pricing, contribution guardrail | done | `src/server/billing/plans.ts` |
+| Value receipt / usage page, owner-only unit economics | done | `src/app/(app)/usage/page.tsx` |
+| Login / logout API, shared auth path | done | `src/app/api/auth/`, `src/server/auth/authenticate.ts` |
+| Funnel analytics, zero-PII, property allowlist | done | `src/lib/analytics.ts` |
+| Versioned migrations | done | `drizzle/0000_initial_schema.sql` |
+| Doctor: preflight diagnosis without a server | done | `scripts/doctor.ts` |
+| Live smoke test (29 checks) | done | `scripts/smoke.ts` |
+| CI: typecheck, tests, schema, seed, build, smoke, secret scan | done | `.github/workflows/ci.yml` |
+| `.env.local` loading for scripts and drizzle-kit | done | `src/lib/load-env.ts` |
 
 ## Not built yet
 
 | Area | Priority | Note |
 | --- | --- | --- |
-| Monetisation: credits, metering, subscription | should | Cost accounting already exists; billing does not |
-| Analytics events (activation, aha, funnel) | should | Metric names defined in the PDR |
-| CI workflows (`.github/workflows`) | should | typecheck + test + build |
-| E2E tests (Playwright) | should | Signup → voice → approve → outcome |
-| Versioned migration files | should | `db:push` in use; run `db:generate` before production |
+| Recurring subscription billing | nice | One-off credit packs are live; a subscription needs Razorpay Subscriptions and a renewal webhook |
+| Stripe adapter for non-Indian customers | nice | The `PaymentProvider` interface is ready; it is one file |
+| Refund execution | nice | Policy and ledger fields exist; the provider refund call does not |
+| Browser recorder for the Sarvam utterance path | should | Adapter is done; the client-side record-and-post loop is not |
+| Indian-language evaluation set (accents, plant noise, equipment vocabulary) | should | Highest-leverage missing piece before claiming language quality |
+| Native-language system prompting per language | should | Prompt is English today |
+| Browser E2E (Playwright) | should | Real microphone path; the API funnel is covered by `npm run smoke` |
 | Postgres RLS policies | nice | Enforced at query layer today |
 | Redis-backed rate limit and cache | nice | Needed only above one node |
 | Hosted TTS behind an adapter | nice | Browser `speechSynthesis` today |
 | Supervisor dashboard, multilingual, integrations | nice | Explicit non-goals for V1 |
+
+## Bugs found and fixed by the test suite
+
+Recorded because they are the reason the suite exists:
+
+- **Sequence race in conversation logging.** `sequence = max + 1` was read-then-write; two concurrent
+  turns collided on the unique index. Now allocated inside the INSERT with a bounded retry, and a
+  failed transcript line can never fail the technician's turn.
+- **Pricing model inverted.** The profitability gate used `CREDIT_PRICE_USD` — a *sale* price — as a
+  proxy for cost, and passed packs that could not cover their own inference. Cost is now derived
+  from the model pricing table, and the 1,500 pack was repriced from ₹1,499 to ₹1,799 as a result.
+- **`.env.local` not read by scripts.** `drizzle-kit` and the CLI scripts loaded `.env`, so
+  `db:push` failed straight after setup wrote `.env.local`.
+- **Credit price was inconsistent with the pack catalogue.** `CREDIT_PRICE_USD` was $0.06 (₹5.28)
+  while packs actually sell credits at ₹1.20–1.49. Every margin figure in the product — including the
+  owner economics panel — was overstated roughly 4x. Now set to the lowest realised pack rate so
+  revenue is undercounted rather than flattered.
+- **`setup.ps1` reported success after failure.** PowerShell does not throw on a native command's
+  exit code.
 
 ## Known limitations
 
@@ -55,3 +103,5 @@ schema pushed to Postgres 16 · seed loaded.
   abstraction means customer pricing does not have to move when they do.
 - The `number` column on `work_orders` is a global sequence, so work order numbers are unique
   across the platform rather than per organisation.
+- `npm run smoke` exercises the API funnel, not the microphone. Real audio capture and turn-taking
+  still need a human at a browser — `docs/DEMO.md` is that checklist.

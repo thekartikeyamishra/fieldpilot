@@ -17,8 +17,12 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body>{children}</body>
+    // suppressHydrationWarning: browser extensions (password managers, screen
+    // recorders, translators) add attributes to <html> and <body> before React
+    // hydrates. That is their mutation, not a render mismatch of ours, and it
+    // is the one case React documents this escape hatch for.
+    <html lang="en" suppressHydrationWarning>
+      <body suppressHydrationWarning>{children}</body>
     </html>
   );
 }

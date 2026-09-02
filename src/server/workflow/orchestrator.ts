@@ -1,5 +1,5 @@
 import "server-only";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, sql as raw } from "drizzle-orm";
 import { db } from "@/db/client";
 import { conversationEvents, voiceSessions } from "@/db/schema";
 import { env } from "@/lib/env";
@@ -11,10 +11,12 @@ import { buildUserPrompt, PROMPT_VERSION, SYSTEM_PROMPT } from "@/ai/prompts/sys
 import { agentTurnSchema, type AgentTurn } from "@/ai/schemas";
 import { clampTranscript, fence, scanForInjection } from "@/ai/safety";
 import { recordAudit } from "../audit/audit";
-import { checkBudget, recordUsage } from "../cost/governor";
+import { checkBudget, recordUsage, withSessionBudgetLock } from "../cost/governor";
 import { resolveContext, type EvidenceItem } from "../context/resolver";
 import { proposeToolCall, type ProposedCall } from "../tools/gateway";
 import { matchRule, needsReasoning } from "./rules";
+import { consume, refund } from "../billing/credits";
+import { creditsForTurn } from "../billing/plans";
 import type { Session } from "../auth/session";
 
 /**
@@ -41,6 +43,8 @@ export type TurnResult = {
     budget: { spentSession: number; limitSession: number };
     degraded: boolean;
     promptVersion: string;
+    creditsCharged: number;
+    creditBalance: number | null;
   };
 };
 
@@ -130,7 +134,7 @@ export async function runTurn(params: {
         asset: null,
         candidates: context.candidates,
         proposal: null,
-        meta: { path: "rule", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetShell, degraded: false, promptVersion: PROMPT_VERSION },
+        meta: { path: "rule", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetShell, degraded: false, promptVersion: PROMPT_VERSION, creditsCharged: 0, creditBalance: null },
       },
     });
   }
@@ -159,7 +163,7 @@ export async function runTurn(params: {
         asset: assetOut,
         candidates: [],
         proposal: { ...proposal, summary: proposal.description },
-        meta: { path: "rule", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetShell, degraded: false, promptVersion: PROMPT_VERSION },
+        meta: { path: "rule", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetShell, degraded: false, promptVersion: PROMPT_VERSION, creditsCharged: 0, creditBalance: null },
       },
     });
   }
@@ -186,7 +190,7 @@ export async function runTurn(params: {
       session: params.session,
       voiceSessionId: vs.id,
       started,
-      result: { ...built, asset: assetOut, candidates: [], meta: { path: "cache", model: "cache", tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetShell, degraded: false, promptVersion: PROMPT_VERSION } },
+      result: { ...built, asset: assetOut, candidates: [], meta: { path: "cache", model: "cache", tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetShell, degraded: false, promptVersion: PROMPT_VERSION, creditsCharged: 0, creditBalance: null } },
     });
   }
 
@@ -213,13 +217,15 @@ export async function runTurn(params: {
 
   let budget;
   try {
-    budget = await checkBudget({
-      organizationId: params.session.organizationId,
-      userId: params.session.userId,
-      sessionId: vs.id,
-      desiredTier,
-      estimatedInputChars: userPrompt.length,
-    });
+    budget = await withSessionBudgetLock(vs.id, () =>
+      checkBudget({
+        organizationId: params.session.organizationId,
+        userId: params.session.userId,
+        sessionId: vs.id,
+        desiredTier,
+        estimatedInputChars: userPrompt.length,
+      }),
+    );
   } catch (error) {
     if (error instanceof AppError && error.code === "SESSION_LIMIT_REACHED") throw error;
     throw error;
@@ -234,8 +240,42 @@ export async function runTurn(params: {
       session: params.session,
       voiceSessionId: vs.id,
       started,
-      result: { ...built, asset: assetOut, candidates: [], meta: { path: "fallback", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetOut, degraded: true, promptVersion: PROMPT_VERSION } },
+      result: { ...built, asset: assetOut, candidates: [], meta: { path: "fallback", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetOut, degraded: true, promptVersion: PROMPT_VERSION, creditsCharged: 0, creditBalance: null } },
     });
+  }
+
+  // Charge the customer only for work we are about to pay a provider for.
+  // Rule hits, cache hits and degraded turns above never reach this line.
+  const creditCost = creditsForTurn("model", budget.tier);
+  const creditReference = `${vs.id}:${transcript.slice(0, 64)}:${budget.tier}`;
+  let credits: { balance: number; charged: number };
+
+  try {
+    credits = await consume({
+      organizationId: params.session.organizationId,
+      userId: params.session.userId,
+      sessionId: vs.id,
+      amount: creditCost,
+      reference: creditReference,
+      metadata: { tier: budget.tier },
+    });
+  } catch (error) {
+    // Out of credits is not a dead end: fall back to the evidence-only answer.
+    if (error instanceof AppError && error.code === "BUDGET_EXCEEDED") {
+      const built = await buildFromAgentTurn(params.session, vs.id, context, degradedTurn(context, transcript));
+      return finish({
+        session: params.session,
+        voiceSessionId: vs.id,
+        started,
+        result: {
+          ...built,
+          asset: assetOut,
+          candidates: [],
+          meta: { path: "fallback", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetOut, degraded: true, promptVersion: PROMPT_VERSION, creditsCharged: 0, creditBalance: 0 },
+        },
+      });
+    }
+    throw error;
   }
 
   try {
@@ -287,12 +327,24 @@ export async function runTurn(params: {
           budget: budgetOut,
           degraded: budget.verdict === "degrade",
           promptVersion: PROMPT_VERSION,
+          creditsCharged: credits.charged,
+          creditBalance: credits.balance,
         },
       },
     });
   } catch (error) {
     // The provider is down. The technician still gets context, evidence and an action.
     log.warn("model_unavailable_degrading", { error: String(error) });
+
+    // Our provider failed after we charged. Give the credit back.
+    await refund({
+      organizationId: params.session.organizationId,
+      userId: params.session.userId,
+      sessionId: vs.id,
+      amount: credits.charged,
+      reference: creditReference,
+      reason: "provider_unavailable",
+    });
     await recordUsage({
       organizationId: params.session.organizationId,
       userId: params.session.userId,
@@ -311,7 +363,7 @@ export async function runTurn(params: {
       session: params.session,
       voiceSessionId: vs.id,
       started,
-      result: { ...built, asset: assetOut, candidates: [], meta: { path: "fallback", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetOut, degraded: true, promptVersion: PROMPT_VERSION } },
+      result: { ...built, asset: assetOut, candidates: [], meta: { path: "fallback", model: null, tier: null, latencyMs: Date.now() - started, costUsd: 0, budget: budgetOut, degraded: true, promptVersion: PROMPT_VERSION, creditsCharged: 0, creditBalance: null } },
     });
   }
 }
@@ -410,22 +462,35 @@ async function appendEvent(
   content: string,
   metadata: Record<string, unknown> = {},
 ) {
-  const [last] = await db
-    .select({ sequence: conversationEvents.sequence })
-    .from(conversationEvents)
-    .where(eq(conversationEvents.sessionId, sessionId))
-    .orderBy(desc(conversationEvents.sequence))
-    .limit(1);
-
-  await db.insert(conversationEvents).values({
-    organizationId,
-    sessionId,
-    sequence: (last?.sequence ?? 0) + 1,
-    speaker,
-    eventType,
-    content: content.slice(0, 4000),
-    metadata,
-  });
+  // The sequence is allocated inside the INSERT rather than read first, so two
+  // concurrent turns cannot both compute the same number. The unique index is
+  // the final arbiter; on the rare collision we retry with a fresh maximum.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      await db.execute(raw`
+        insert into conversation_events
+          (organization_id, session_id, sequence, speaker, event_type, content, metadata)
+        values (
+          ${organizationId},
+          ${sessionId},
+          (select coalesce(max(sequence), 0) + 1 from conversation_events where session_id = ${sessionId}),
+          ${speaker},
+          ${eventType},
+          ${content.slice(0, 4000)},
+          ${JSON.stringify(metadata)}::jsonb
+        )
+      `);
+      return;
+    } catch (error) {
+      const isConflict = String(error).includes("conversation_events_seq_unique");
+      if (!isConflict || attempt === 2) {
+        // Losing a transcript line must never fail the technician's turn.
+        log.warn("conversation_event_write_failed", { sessionId, error: String(error).slice(0, 160) });
+        return;
+      }
+      await new Promise((r) => setTimeout(r, 25 * (attempt + 1)));
+    }
+  }
 }
 
 async function recentHistory(sessionId: string) {

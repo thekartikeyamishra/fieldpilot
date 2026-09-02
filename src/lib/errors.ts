@@ -13,6 +13,7 @@ export type ErrorCode =
   | "BUDGET_EXCEEDED"
   | "SESSION_LIMIT_REACHED"
   | "PROVIDER_UNAVAILABLE"
+  | "PROVIDER_NOT_CONFIGURED"
   | "TOOL_NOT_ALLOWED"
   | "TOOL_FAILED"
   | "CONFLICT"
@@ -28,6 +29,7 @@ const HTTP: Record<ErrorCode, number> = {
   BUDGET_EXCEEDED: 402,
   SESSION_LIMIT_REACHED: 409,
   PROVIDER_UNAVAILABLE: 503,
+  PROVIDER_NOT_CONFIGURED: 503,
   TOOL_NOT_ALLOWED: 403,
   TOOL_FAILED: 500,
   CONFLICT: 409,
@@ -45,6 +47,8 @@ const HUMAN: Record<ErrorCode, string> = {
   BUDGET_EXCEEDED: "You've reached your current usage allowance. Your work is saved.",
   SESSION_LIMIT_REACHED: "This voice session reached its limit. Start a new one — everything so far is recorded.",
   PROVIDER_UNAVAILABLE: "Voice is temporarily unavailable. Your work is safe. Try again.",
+  PROVIDER_NOT_CONFIGURED:
+    "Voice isn't set up on this deployment yet. You can still type what you'd say — everything else works the same.",
   TOOL_NOT_ALLOWED: "That action isn't permitted from a voice session.",
   TOOL_FAILED: "The action didn't complete. Nothing was changed. Try again.",
   CONFLICT: "That action was already completed. No duplicate was created.",
