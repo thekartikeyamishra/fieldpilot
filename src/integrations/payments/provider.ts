@@ -18,6 +18,12 @@ export type ProviderOrder = {
   publicKey: string;
   /** True when the provider fulfils immediately without a real payment (dev only). */
   autoFulfils: boolean;
+  /**
+   * Hosted checkout page to send the buyer to. Razorpay opens in-page with the
+   * public key; Square hands back a URL. Both shapes fit here so the caller
+   * does not branch on provider name.
+   */
+  checkoutUrl?: string;
 };
 
 export type WebhookVerification =

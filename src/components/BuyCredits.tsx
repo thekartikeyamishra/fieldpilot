@@ -23,9 +23,22 @@ const format = (amountMinor: number, currency: string) =>
  * it never grants a credit. Success here just refreshes the balance; the actual
  * grant happens server-side when the provider's signed webhook arrives.
  */
-export default function BuyCredits({ packs, enabled }: { packs: Pack[]; enabled: boolean }) {
+export default function BuyCredits({
+  packs,
+  enabled,
+  intlPacks = [],
+}: {
+  packs: Pack[];
+  enabled: boolean;
+  intlPacks?: Pack[];
+}) {
   const [busy, setBusy] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // Currency is the buyer's explicit choice, not a guess from their IP. Getting
+  // it wrong means charging the wrong amount in the wrong currency.
+  const [intl, setIntl] = useState(false);
+  const shown = intl && intlPacks.length ? intlPacks : packs;
+  const currency = shown[0]?.currency ?? "INR";
 
   const buy = async (sku: string) => {
     setBusy(sku);
@@ -35,7 +48,7 @@ export default function BuyCredits({ packs, enabled }: { packs: Pack[]; enabled:
       const res = await fetch("/api/billing/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sku }),
+        body: JSON.stringify({ sku, currency }),
       });
       const json = await res.json();
 
@@ -47,12 +60,21 @@ export default function BuyCredits({ packs, enabled }: { packs: Pack[]; enabled:
       const checkout = json.data as {
         orderId: string; amountMinor: number; currency: string;
         publicKey: string; provider: string; credits: number; autoFulfilled: boolean;
+        checkoutUrl?: string;
       };
 
       // Development provider: no money moves, credits are already granted.
       if (checkout.autoFulfilled) {
         setNotice(`${checkout.credits} credits added (test mode — no payment was taken).`);
         setTimeout(() => window.location.reload(), 900);
+        return;
+      }
+
+      // Redirect-style providers (Square) hand back a hosted page. Nothing is
+      // granted here either — the signed webhook is still the only thing that
+      // creates credits.
+      if (checkout.checkoutUrl) {
+        window.location.href = checkout.checkoutUrl;
         return;
       }
 
@@ -97,10 +119,34 @@ export default function BuyCredits({ packs, enabled }: { packs: Pack[]; enabled:
     );
   }
 
+  const toggle = intlPacks.length ? (
+    <div style={{ display: "flex", gap: 8, marginBottom: 16 }}>
+      {[
+        { on: false, label: "India (INR)" },
+        { on: true, label: "International" },
+      ].map((option) => (
+        <button
+          key={option.label}
+          type="button"
+          onClick={() => setIntl(option.on)}
+          className="tag"
+          style={{
+            cursor: "pointer",
+            borderColor: intl === option.on ? "var(--signal)" : undefined,
+            color: intl === option.on ? "var(--signal)" : undefined,
+          }}
+        >
+          {option.label}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
   return (
     <div className="space-y-3">
+      {toggle}
       <div className="grid gap-3 sm:grid-cols-3">
-        {packs.map((pack) => (
+        {shown.map((pack) => (
           <div key={pack.sku} className="panel flex flex-col gap-2 p-4">
             <p className="data text-lg font-semibold">{pack.credits.toLocaleString()}</p>
             <p className="legend">credits</p>

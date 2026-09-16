@@ -1,6 +1,6 @@
 # Implementation status
 
-Last verified: `tsc --noEmit` clean · `next build` clean · **126 unit tests green** ·
+Last verified: `tsc --noEmit` clean · `next build` clean · **142 unit tests green** ·
 **44/44 live smoke checks green** against a running server and a real Postgres 16 ·
 versioned migration generated · seed loaded.
 
@@ -30,7 +30,11 @@ versioned migration generated · seed loaded.
 | One-click export with checksums | done | `src/app/api/export/` |
 | Health check | done | `src/app/api/health/` |
 | Landing, auth, dashboard, assets, work pages | done | `src/app/` |
-| Unit tests (126) | done | `tests/unit/` |
+| Unit tests (142) | done | `tests/unit/` |
+| International payments via Square, currency-routed | done | `src/integrations/payments/square.ts` |
+| Region pricing with fee-aware margin tests | done | `src/server/billing/catalog.ts` |
+| Canonical host redirect for fieldpilot.me | done | `next.config.ts` |
+| Remotion product demo: 9 scenes, transitions, synthesised SFX, voiceover hook | done | `demo/` |
 | Streaming export, constant memory, explicit columns | done | `src/server/export/stream.ts` |
 | Spoof-resistant client IP + per-IP auth throttling | done | `src/lib/client-ip.ts` |
 | Per-session budget lock | done | `src/server/cost/governor.ts` |
@@ -59,6 +63,13 @@ versioned migration generated · seed loaded.
 | `.env.local` loading for scripts and drizzle-kit | done | `src/lib/load-env.ts` |
 
 ## Not built yet
+
+> **Gating gap for real customers:** there is no UI to create sites, assets,
+> procedures or users. Signup seeds a starter set; everything else needs a
+> script. A business cannot onboard itself today. This is the highest-priority
+> item before any customer touches the product — see `docs/CUSTOMER-GUIDE.md`
+> section 3, which documents the workaround honestly.
+
 
 | Area | Priority | Note |
 | --- | --- | --- |

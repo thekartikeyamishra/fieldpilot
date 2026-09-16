@@ -34,8 +34,7 @@ export const BUSINESS = {
     email: "workmailkartikeya@gmail.com",
   },
 
-  /** TODO: your production domain, once deployed. */
-  websiteUrl: "https://fieldpilot.app",
+  websiteUrl: "https://fieldpilot.me",
 
   jurisdiction: "the courts of India",
   governingLaw: "the laws of India",

@@ -8,8 +8,8 @@ import { newId } from "@/lib/ids";
 import { recordAudit } from "../audit/audit";
 import { track } from "@/lib/analytics";
 import { grant } from "./credits";
-import { packFor, packIsProfitable, type Sku } from "./catalog";
-import { paymentProvider } from "@/integrations/payments";
+import { packFor, packIsProfitable, regionForCurrency, type Region, type Sku } from "./catalog";
+import { paymentProviderFor } from "@/integrations/payments";
 
 /**
  * Purchase flow.
@@ -29,14 +29,19 @@ export type CheckoutSession = {
   credits: number;
   /** Dev-only providers fulfil at once; the UI skips checkout when this is true. */
   autoFulfilled: boolean;
+  /** Redirect-style providers (Square) hand back a hosted page instead of a key. */
+  checkoutUrl?: string;
 };
 
 export async function startCheckout(input: {
   organizationId: string;
   userId: string;
   sku: string;
+  /** Defaults to domestic. Currency, not geography, decides price and rail. */
+  region?: Region;
 }): Promise<CheckoutSession> {
-  const pack = packFor(input.sku);
+  const region = input.region ?? "IN";
+  const pack = packFor(input.sku, region);
 
   // A pack that cannot cover the inference it buys must never be sold.
   if (!packIsProfitable(pack)) {
@@ -44,7 +49,7 @@ export async function startCheckout(input: {
     throw new AppError("FEATURE_DISABLED", "this pack is not available");
   }
 
-  const provider = paymentProvider();
+  const provider = paymentProviderFor(pack.currency);
   const receipt = `fp_${newId().replace(/-/g, "").slice(0, 20)}`;
 
   const order = await provider.createOrder({
@@ -103,6 +108,7 @@ export async function startCheckout(input: {
     provider: provider.name,
     credits: pack.credits,
     autoFulfilled: order.autoFulfils,
+    checkoutUrl: order.checkoutUrl,
   };
 }
 
@@ -164,7 +170,7 @@ export async function fulfil(input: {
     return { granted: false, reason: "amount mismatch", credits: 0 };
   }
 
-  const pack = packFor(payment.sku as Sku);
+  const pack = packFor(payment.sku as Sku, regionForCurrency(payment.currency));
 
   // Guard 3: the credit grant is itself idempotent by order id.
   const result = await grant({

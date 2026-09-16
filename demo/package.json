@@ -1,0 +1,28 @@
+{
+  "name": "fieldpilot-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion product demo for FieldPilot",
+  "scripts": {
+    "start": "remotion studio",
+    "render": "remotion render Demo out/fieldpilot-demo.mp4 --codec=h264 --crf=17",
+    "render:square": "remotion render DemoSquare out/fieldpilot-square.mp4 --codec=h264 --crf=18",
+    "render:cover": "remotion still Cover out/cover.png --scale=2",
+    "voiceover": "tsx scripts/voiceover.ts",
+    "upgrade": "remotion upgrade"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.398",
+    "@remotion/media-utils": "4.0.398",
+    "@remotion/transitions": "4.0.398",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "remotion": "4.0.398"
+  },
+  "devDependencies": {
+    "@types/react": "19.1.13",
+    "dotenv": "^17.4.2",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.2"
+  }
+}

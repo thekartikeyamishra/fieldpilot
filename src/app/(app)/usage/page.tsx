@@ -4,7 +4,7 @@ import { PLANS } from "@/server/billing/plans";
 import { ATTRIBUTION_BASIS } from "@/server/outcomes/attribution";
 import { Legend, Panel, Tag } from "@/components/ui";
 import BuyCredits from "@/components/BuyCredits";
-import { CREDIT_PACKS, formatMinor } from "@/server/billing/catalog";
+import { CREDIT_PACKS, INTL_CREDIT_PACKS, formatMinor } from "@/server/billing/catalog";
 import { listPayments, paymentsEnabled } from "@/server/billing/purchase";
 
 export const dynamic = "force-dynamic";
@@ -93,7 +93,7 @@ export default async function UsagePage() {
       {isOwner ? (
         <Panel>
           <Legend>Top up</Legend>
-          <BuyCredits packs={Object.values(CREDIT_PACKS)} enabled={paymentsEnabled()} />
+          <BuyCredits packs={Object.values(CREDIT_PACKS)} intlPacks={Object.values(INTL_CREDIT_PACKS)} enabled={paymentsEnabled()} />
           {history.length ? (
             <ul className="mt-4 divide-y divide-[var(--line)] border-t border-[var(--line)]">
               {history.map((p) => (

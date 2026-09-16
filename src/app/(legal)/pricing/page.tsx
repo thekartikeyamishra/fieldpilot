@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import { LegalHeader, Section } from "@/components/legal";
-import { CREDIT_PACKS, formatMinor } from "@/server/billing/catalog";
+import { CREDIT_PACKS, INTL_CREDIT_PACKS, formatMinor } from "@/server/billing/catalog";
 import { PLANS } from "@/server/billing/plans";
 import { BUSINESS } from "@/content/business";
 

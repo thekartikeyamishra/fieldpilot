@@ -66,11 +66,27 @@ const schema = z.object({
   SARVAM_TTS_ENABLED: bool(true),
 
   // razorpay | mock. "mock" fulfils instantly and is for local development only.
+  /** Domestic (INR) provider. */
   PAYMENTS_PROVIDER: z.enum(["razorpay", "mock"]).default("mock"),
+  /** Cross-border provider. Square settles USD and most major currencies. */
+  PAYMENTS_PROVIDER_INTL: z.enum(["square", "none"]).default("none"),
+  PAYMENTS_CURRENCY_INTL: z.string().default("USD"),
   PAYMENTS_CURRENCY: z.string().default("INR"),
   RAZORPAY_KEY_ID: z.string().default(""),
   RAZORPAY_KEY_SECRET: z.string().default(""),
   RAZORPAY_WEBHOOK_SECRET: z.string().default(""),
+
+  // --- Square (international) ---------------------------------------------
+  SQUARE_ACCESS_TOKEN: z.string().default(""),
+  SQUARE_LOCATION_ID: z.string().default(""),
+  SQUARE_WEBHOOK_SIGNATURE_KEY: z.string().default(""),
+  /**
+   * The webhook URL EXACTLY as entered in the Square dashboard. Square signs
+   * (url + body), so a trailing slash or http/https mismatch here makes every
+   * signature fail — and the failure looks identical to a forged request.
+   */
+  SQUARE_WEBHOOK_URL: z.string().default(""),
+  SQUARE_ENVIRONMENT: z.enum(["production", "sandbox"]).default("production"),
 
   /** Proxies in front of the app that append to x-forwarded-for. Vercel = 1. */
   TRUSTED_PROXY_HOPS: num(1),
