@@ -25,6 +25,7 @@ export type AnalyticsEvent =
   | "turn_degraded"
   | "budget_ceiling_hit"
   | "data_exported"
+  | "data_imported"
   | "checkout_started"
   | "credits_purchased";
 

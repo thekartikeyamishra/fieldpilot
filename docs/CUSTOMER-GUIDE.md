@@ -77,11 +77,11 @@ your operation, you have spent three minutes rather than three days.
 
 ### Step 3 — Load your own assets
 
-> **Be aware:** there is currently no screen for adding sites, assets or
-> procedures. This is the single biggest gap in the product for a new customer,
-> and it is being fixed. Until then, loading data requires a script.
+Go to **Assets → Import assets or procedures**. Download the template, fill it
+in, and upload it. You will see a preview of exactly what will be created before
+anything is written.
 
-Prepare a spreadsheet with one row per asset:
+One row per asset:
 
 | Column | Example | Notes |
 | --- | --- | --- |
@@ -91,7 +91,8 @@ Prepare a spreadsheet with one row per asset:
 | Type | pump | Lowercase; used to match procedures |
 | Spec | operating_pressure_bar: 6.0-8.2 | Optional, but it makes recommendations sharper |
 
-Send it to support, or adapt `scripts/seed.ts` if you are self-hosting.
+Save from Excel as **CSV UTF-8**. Re-importing a corrected file updates rows
+rather than duplicating them, and a file with any error is not imported at all.
 
 **The asset code matters more than anything else here.** Asset resolution is
 deterministic: "pump three" becomes P-003 because the number matches. If your

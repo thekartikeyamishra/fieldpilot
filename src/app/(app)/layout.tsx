@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { can } from "@/server/policy/roles";
 import { getSession } from "@/server/auth/session";
 import { signOut } from "@/server/auth/actions";
 import { GaugeMark } from "@/components/ui";
@@ -12,6 +13,9 @@ const NAV = [
   { href: "/assets", label: "Assets" },
   { href: "/work", label: "Work" },
   { href: "/usage", label: "Usage" },
+  // Owners only — filtered below. Showing a technician a link that redirects
+  // them away is a small, avoidable moment of confusion.
+  { href: "/team", label: "Team", ownerOnly: true },
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
@@ -28,7 +32,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           </Link>
 
           <nav className="ml-auto flex items-center gap-1 overflow-x-auto">
-            {NAV.map((item) => (
+            {NAV.filter((item) => !item.ownerOnly || can(session.role, "org:manage")).map((item) => (
               <Link
                 key={item.href}
                 href={item.href}

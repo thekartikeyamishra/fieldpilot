@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { requireSession } from "@/server/auth/session";
+import { can } from "@/server/policy/roles";
 import { listAssetsForOrg } from "@/server/context/resolver";
 import { Button, EmptyState, Legend, Panel, Tag } from "@/components/ui";
 
@@ -17,15 +18,20 @@ export default async function AssetsPage() {
         <p className="mt-1 text-sm text-[var(--muted)]">
           Everything FieldPilot can identify by name or tag when you speak.
         </p>
+        {can(session.role, "asset:write") ? (
+          <Link href="/import" className="mt-3 inline-block">
+            <Button>Import assets or procedures</Button>
+          </Link>
+        ) : null}
       </div>
 
       {rows.length === 0 ? (
         <EmptyState
           title="No assets yet"
-          body="FieldPilot needs at least one asset to reason about. Run the seed script, or add assets through import."
+          body="FieldPilot needs at least one asset to reason about. Import your register from a spreadsheet — it takes a few minutes."
           action={
-            <Link href="/job">
-              <Button>Start voice job</Button>
+            <Link href={can(session.role, "asset:write") ? "/import" : "/job"}>
+              <Button>{can(session.role, "asset:write") ? "Import assets" : "Start voice job"}</Button>
             </Link>
           }
         />

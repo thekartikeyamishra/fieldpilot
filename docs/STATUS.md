@@ -1,6 +1,6 @@
 # Implementation status
 
-Last verified: `tsc --noEmit` clean · `next build` clean · **142 unit tests green** ·
+Last verified: `tsc --noEmit` clean · `next build` clean · **170 unit tests green** ·
 **44/44 live smoke checks green** against a running server and a real Postgres 16 ·
 versioned migration generated · seed loaded.
 
@@ -30,7 +30,10 @@ versioned migration generated · seed loaded.
 | One-click export with checksums | done | `src/app/api/export/` |
 | Health check | done | `src/app/api/health/` |
 | Landing, auth, dashboard, assets, work pages | done | `src/app/` |
-| Unit tests (142) | done | `tests/unit/` |
+| Unit tests (170) | done | `tests/unit/` |
+| CSV import: assets + procedures, preview, all-or-nothing, upsert | done | `src/server/import/` |
+| Team: invites, roles, deactivation, last-owner protection | done | `src/server/team/invites.ts` |
+| robots.txt, sitemap, canonical host, deployment diagnostics | done | `src/app/robots.ts`, `/api/health` |
 | International payments via Square, currency-routed | done | `src/integrations/payments/square.ts` |
 | Region pricing with fee-aware margin tests | done | `src/server/billing/catalog.ts` |
 | Canonical host redirect for fieldpilot.me | done | `next.config.ts` |
@@ -64,11 +67,9 @@ versioned migration generated · seed loaded.
 
 ## Not built yet
 
-> **Gating gap for real customers:** there is no UI to create sites, assets,
-> procedures or users. Signup seeds a starter set; everything else needs a
-> script. A business cannot onboard itself today. This is the highest-priority
-> item before any customer touches the product — see `docs/CUSTOMER-GUIDE.md`
-> section 3, which documents the workaround honestly.
+> **Closed:** businesses can now import their own assets and procedures and
+> invite their own team. Remaining gaps are listed in `docs/TESTING-GUIDE.md`
+> Part 6.
 
 
 | Area | Priority | Note |

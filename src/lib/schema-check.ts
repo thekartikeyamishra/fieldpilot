@@ -24,6 +24,7 @@ const EXPECTED: Array<{ table: string; column?: string }> = [
   { table: "payments" },
   { table: "webhook_events" },
   { table: "rate_limits" },
+  { table: "invites" },
 ];
 
 export type SchemaCheck = { ok: boolean; detail: string; missing: string[] };

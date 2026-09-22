@@ -372,6 +372,31 @@ export const webhookEvents = pgTable(
  * under load. Since our abuse and cost controls depend on it, it has to be
  * shared state.
  */
+/**
+ * Invitations to join an existing organisation.
+ *
+ * Only a hash of the token is stored, so a leaked database backup cannot be
+ * turned into working invite links. An invite is single-use, expires, can be
+ * revoked, and may be pinned to one email address.
+ */
+export const invites = pgTable(
+  "invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    organizationId: uuid("organization_id").notNull().references(() => organizations.id, { onDelete: "cascade" }),
+    role: text("role").notNull(),
+    email: text("email"),
+    tokenHash: text("token_hash").notNull(),
+    createdBy: uuid("created_by").notNull(),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }),
+    usedBy: uuid("used_by"),
+    revokedAt: timestamp("revoked_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("invites_token_hash_unique").on(t.tokenHash), index("invites_org_idx").on(t.organizationId)],
+);
+
 export const rateLimits = pgTable("rate_limits", {
   key: text("key").primaryKey(),
   count: integer("count").notNull().default(0),

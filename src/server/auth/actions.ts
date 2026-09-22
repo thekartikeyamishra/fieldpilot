@@ -4,12 +4,13 @@ import { redirect } from "next/navigation";
 import { eq } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { assets, organizations, procedures, sites, users } from "@/db/schema";
+import { assets, invites, organizations, procedures, sites, users } from "@/db/schema";
 import { rateLimit } from "@/lib/rate-limit";
 import { recordAudit } from "../audit/audit";
 import { track } from "@/lib/analytics";
 import { ensureAccount } from "../billing/credits";
 import { hashPassword } from "./password";
+import { claimInvite } from "../team/invites";
 import { authenticate } from "./authenticate";
 import { createSessionCookie, destroySession } from "./session";
 import type { Role } from "../policy/roles";
@@ -26,7 +27,19 @@ const signupSchema = credentials.extend({
   organization: z.string().min(2, "Enter your organisation").max(80),
 });
 
+const inviteSignupSchema = credentials.extend({
+  name: z.string().min(2, "Enter your name").max(80),
+  invite: z.string().min(20).max(200),
+});
+
+/** Postgres unique violation — two signups for one email racing each other. */
+const isUniqueViolation = (error: unknown) =>
+  typeof error === "object" && error !== null && ((error as { code?: string }).code === "23505" || String((error as { cause?: { code?: string } }).cause?.code) === "23505");
+
 export async function signUp(_prev: AuthState, formData: FormData): Promise<AuthState> {
+  // An invite link joins an existing organisation instead of creating one.
+  if (formData.get("invite")) return joinWithInvite(formData);
+
   const parsed = signupSchema.safeParse({
     name: formData.get("name"),
     organization: formData.get("organization"),
@@ -44,19 +57,29 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
   const [existing] = await db.select().from(users).where(eq(users.email, parsed.data.email)).limit(1);
   if (existing) return { error: "That email is already registered. Sign in instead." };
 
-  const [org] = await db.insert(organizations).values({ name: parsed.data.organization }).returning();
+  const passwordHash = await hashPassword(parsed.data.password);
 
-  // First user of an organisation owns it.
-  const [user] = await db
-    .insert(users)
-    .values({
-      organizationId: org.id,
-      email: parsed.data.email,
-      name: parsed.data.name,
-      role: "admin",
-      passwordHash: await hashPassword(parsed.data.password),
-    })
-    .returning();
+  // Organisation and owner are created together. Without the transaction, a
+  // failure after the first insert leaves an organisation that nobody owns.
+  let org: typeof organizations.$inferSelect;
+  let user: typeof users.$inferSelect;
+  try {
+    ({ org, user } = await db.transaction(async (tx) => {
+      const [o] = await tx.insert(organizations).values({ name: parsed.data.organization }).returning();
+      // First user of an organisation owns it.
+      const [u] = await tx
+        .insert(users)
+        .values({ organizationId: o.id, email: parsed.data.email, name: parsed.data.name, role: "admin", passwordHash })
+        .returning();
+      return { org: o, user: u };
+    }));
+  } catch (error) {
+    // The existence check above cannot stop two simultaneous signups for the
+    // same email; the unique index does, and this turns it into a clear message
+    // rather than a 500.
+    if (isUniqueViolation(error)) return { error: "That email is already registered. Sign in instead." };
+    throw error;
+  }
 
   await ensureAccount(org.id, "free");
   await seedStarterSite(org.id);
@@ -79,6 +102,71 @@ export async function signUp(_prev: AuthState, formData: FormData): Promise<Auth
     role: user.role as Role,
     name: user.name,
     email: user.email,
+  });
+
+  redirect("/job?first=1");
+}
+
+async function joinWithInvite(formData: FormData): Promise<AuthState> {
+  const parsed = inviteSignupSchema.safeParse({
+    name: formData.get("name"),
+    email: String(formData.get("email") ?? "").toLowerCase().trim(),
+    password: formData.get("password"),
+    invite: String(formData.get("invite") ?? ""),
+  });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+
+  try {
+    await rateLimit(`signup:${parsed.data.email}`, 5, 300);
+  } catch {
+    return { error: "Too many attempts. Wait a minute and try again." };
+  }
+
+  const passwordHash = await hashPassword(parsed.data.password);
+
+  let joined: { user: typeof users.$inferSelect; organizationId: string } | null = null;
+  try {
+    joined = await db.transaction(async (tx) => {
+      const claim = await claimInvite(tx, parsed.data.invite, parsed.data.email);
+      if (!claim) return null;
+      const [u] = await tx
+        .insert(users)
+        .values({ organizationId: claim.organizationId, email: parsed.data.email, name: parsed.data.name, role: claim.role, passwordHash })
+        .returning();
+      await tx.update(invites).set({ usedBy: u.id }).where(eq(invites.id, claim.inviteId));
+      return { user: u, organizationId: claim.organizationId };
+    });
+  } catch (error) {
+    // The transaction rolled back, so the invite is still unused and can be
+    // retried with a different email.
+    if (isUniqueViolation(error)) return { error: "That email already has an account. Sign in, or use a different email." };
+    throw error;
+  }
+
+  // One message for every failure mode on purpose: telling a stranger whether a
+  // token exists, expired, or belongs to someone else helps them probe for one.
+  if (!joined) {
+    return { error: "This invite link is no longer valid. Ask whoever invited you for a new one — and check you used the email it was sent to." };
+  }
+
+  await recordAudit({
+    organizationId: joined.organizationId,
+    actorType: "user",
+    actorId: joined.user.id,
+    action: "team.joined",
+    resourceType: "user",
+    resourceId: joined.user.id,
+    result: "succeeded",
+    metadata: { role: joined.user.role },
+  });
+  await track({ organizationId: joined.organizationId, userId: joined.user.id, event: "signup_completed", properties: { via: "invite" } });
+
+  await createSessionCookie({
+    userId: joined.user.id,
+    organizationId: joined.organizationId,
+    role: joined.user.role as Role,
+    name: joined.user.name,
+    email: joined.user.email,
   });
 
   redirect("/job?first=1");

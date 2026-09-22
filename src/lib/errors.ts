@@ -61,6 +61,21 @@ export class AppError extends Error {
   readonly status: number;
   readonly retryable: boolean;
   readonly detail?: unknown;
+  /**
+   * Whether `message` was written for the end user. Off by default: internal
+   * messages can carry table names, provider responses or ids, so the safe
+   * default is the generic line for the code. Opt in only for text we authored
+   * to help the user fix their own input — "missing column: asset_code" is
+   * useful; "violates constraint assets_org_code_unique" is a leak.
+   */
+  exposeMessage = false;
+
+  /** An error whose message is written for, and safe to show to, the user. */
+  static forUser(code: ErrorCode, message: string): AppError {
+    const error = new AppError(code, message);
+    error.exposeMessage = true;
+    return error;
+  }
 
   constructor(code: ErrorCode, message?: string, detail?: unknown) {
     super(message ?? code);
@@ -72,7 +87,7 @@ export class AppError extends Error {
   }
 
   get userMessage(): string {
-    return HUMAN[this.code];
+    return this.exposeMessage ? this.message.slice(0, 400) : HUMAN[this.code];
   }
 }
 
